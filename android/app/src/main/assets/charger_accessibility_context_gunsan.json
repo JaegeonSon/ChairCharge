@@ -1,0 +1,820 @@
+{
+  "metadata": {
+    "area": "전북특별자치도 군산시",
+    "generated_for": "WheelCharge accessibility scoring",
+    "charger_count": 20,
+    "pedestrian_roads_count": 0,
+    "crosswalks_count": 3989,
+    "dem_source": "VWorld DEM 90m",
+    "pedestrian_note": "업로드된 국토교통부 C_UQ164_RO SHP에는 군산시 코드 45130/52130 데이터가 없어 보행자전용도로는 0건으로 처리함. 인접 김제시(52210) 데이터 18건이 bbox에 걸렸으나 군산시 데이터가 아니므로 제외함.",
+    "crosswalk_source": "전북특별자치도 횡단보도 현황 제공 2021-12-21",
+    "created_outputs": [
+      "pedestrian_roads_gunsan_app.geojson",
+      "crosswalks_gunsan_app.geojson",
+      "elevation_slope_gunsan_app.json",
+      "charger_accessibility_context_gunsan.json"
+    ]
+  },
+  "items": [
+    {
+      "charger_id": "CHG_GS_001",
+      "name": "군산경로식당",
+      "address": "전북특별자치도 군산시 중앙로 44-8",
+      "lat": 35.9791865,
+      "lng": 126.7211732,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 14,
+        "nearest_distance_m": 52.5,
+        "pedestrian_signal_count": 2,
+        "curb_cut_count": 11,
+        "tactile_block_count": 9,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 5.4,
+        "slope_percent_est": 1.99,
+        "slope_degree_est": 1.14,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_002",
+      "name": "은파호수공원",
+      "address": "전북특별자치도 군산시 은파순환길 9",
+      "lat": 35.9553629,
+      "lng": 126.6890783,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 5,
+        "nearest_distance_m": 15.2,
+        "pedestrian_signal_count": 1,
+        "curb_cut_count": 5,
+        "tactile_block_count": 2,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 18.1,
+        "slope_percent_est": 4.62,
+        "slope_degree_est": 2.65,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_003",
+      "name": "군산월명체육관",
+      "address": "전북특별자치도 군산시 번영로 281",
+      "lat": 35.9627844,
+      "lng": 126.7460371,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 2,
+        "nearest_distance_m": 48.6,
+        "pedestrian_signal_count": 2,
+        "curb_cut_count": 2,
+        "tactile_block_count": 2,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 6.8,
+        "slope_percent_est": 1.21,
+        "slope_degree_est": 0.69,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_004",
+      "name": "군산시보건소",
+      "address": "전북특별자치도 군산시 수송동로 58",
+      "lat": 35.9647288,
+      "lng": 126.7201756,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 11,
+        "nearest_distance_m": 68.4,
+        "pedestrian_signal_count": 8,
+        "curb_cut_count": 11,
+        "tactile_block_count": 11,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 6.2,
+        "slope_percent_est": 0.46,
+        "slope_degree_est": 0.27,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_005",
+      "name": "군산의료원",
+      "address": "전북특별자치도 군산시 의료원로 27",
+      "lat": 35.95493063,
+      "lng": 126.711918,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 12,
+        "nearest_distance_m": 62.9,
+        "pedestrian_signal_count": 7,
+        "curb_cut_count": 11,
+        "tactile_block_count": 7,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 7.9,
+        "slope_percent_est": 1.18,
+        "slope_degree_est": 0.68,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_006",
+      "name": "군산시청",
+      "address": "전북특별자치도 군산시 시청로 17",
+      "lat": 35.9676359,
+      "lng": 126.7368362,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 9,
+        "nearest_distance_m": 31.5,
+        "pedestrian_signal_count": 5,
+        "curb_cut_count": 7,
+        "tactile_block_count": 7,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 6.1,
+        "slope_percent_est": 0.64,
+        "slope_degree_est": 0.37,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_007",
+      "name": "나운동 주공4차아파트",
+      "address": "전북특별자치도 군산시 문화로 36",
+      "lat": 35.9694682,
+      "lng": 126.7099547,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 10,
+        "nearest_distance_m": 45.9,
+        "pedestrian_signal_count": 7,
+        "curb_cut_count": 10,
+        "tactile_block_count": 6,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 6.5,
+        "slope_percent_est": 0.91,
+        "slope_degree_est": 0.52,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_008",
+      "name": "군산장애인종합복지관",
+      "address": "전북특별자치도 군산시 칠성안3길 37",
+      "lat": 35.959779,
+      "lng": 126.677402,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 1,
+        "nearest_distance_m": 146.7,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 0,
+        "tactile_block_count": 0,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 5
+      },
+      "elevation_slope": {
+        "elevation_m": 11.5,
+        "slope_percent_est": 4.01,
+        "slope_degree_est": 2.3,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 12,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": false,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_009",
+      "name": "삼학동주민센터",
+      "address": "전북특별자치도 군산시 미원로 17",
+      "lat": 35.9769596,
+      "lng": 126.7076264,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 3,
+        "nearest_distance_m": 62.0,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 2,
+        "tactile_block_count": 0,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 7.3,
+        "slope_percent_est": 1.47,
+        "slope_degree_est": 0.84,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_010",
+      "name": "군산금강노인복지관",
+      "address": "전북특별자치도 군산시 백릉로 245",
+      "lat": 35.9804858,
+      "lng": 126.7504256,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 6,
+        "nearest_distance_m": 43.6,
+        "pedestrian_signal_count": 6,
+        "curb_cut_count": 4,
+        "tactile_block_count": 2,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 4.9,
+        "slope_percent_est": 1.31,
+        "slope_degree_est": 0.75,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_011",
+      "name": "군산노인종합복지관",
+      "address": "전북특별자치도 군산시 둔배미길 29",
+      "lat": 35.9829328,
+      "lng": 126.7158346,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 12,
+        "nearest_distance_m": 56.2,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 8,
+        "tactile_block_count": 8,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 6.0,
+        "slope_percent_est": 1.25,
+        "slope_degree_est": 0.71,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_012",
+      "name": "근대역사박물관",
+      "address": "전북특별자치도 군산시 해망로 240",
+      "lat": 35.99081903,
+      "lng": 126.7119523,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 9,
+        "nearest_distance_m": 52.0,
+        "pedestrian_signal_count": 2,
+        "curb_cut_count": 8,
+        "tactile_block_count": 7,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 4.6,
+        "slope_percent_est": 1.02,
+        "slope_degree_est": 0.58,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_013",
+      "name": "군산수송공원",
+      "address": "전북특별자치도 군산시 수송동 851번지",
+      "lat": 35.96551795,
+      "lng": 126.7207259,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 2,
+        "nearest_distance_m": 100.6,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 2,
+        "tactile_block_count": 2,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 5.4,
+        "slope_percent_est": 0.54,
+        "slope_degree_est": 0.31,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_014",
+      "name": "대야노인복지관",
+      "address": "전북특별자치도 군산시 대야면 우덕2길 7",
+      "lat": 35.94707177,
+      "lng": 126.8108294,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 11,
+        "nearest_distance_m": 26.8,
+        "pedestrian_signal_count": 3,
+        "curb_cut_count": 7,
+        "tactile_block_count": 3,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 14.2,
+        "slope_percent_est": 6.34,
+        "slope_degree_est": 3.63,
+        "slope_risk": "보통",
+        "score_bonus": 3,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 11,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": false
+      }
+    },
+    {
+      "charger_id": "CHG_GS_015",
+      "name": "군산해누리노인복지관",
+      "address": "전북특별자치도 군산시 효자길 11",
+      "lat": 35.979289,
+      "lng": 126.7107139822,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 3,
+        "nearest_distance_m": 79.0,
+        "pedestrian_signal_count": 1,
+        "curb_cut_count": 0,
+        "tactile_block_count": 0,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 5
+      },
+      "elevation_slope": {
+        "elevation_m": 13.8,
+        "slope_percent_est": 4.11,
+        "slope_degree_est": 2.35,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 12,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": false,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_016",
+      "name": "수송동 주민센터",
+      "address": "전북특별자치도 군산시 동수송1길 7",
+      "lat": 35.96483636,
+      "lng": 126.717626,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 14,
+        "nearest_distance_m": 54.0,
+        "pedestrian_signal_count": 1,
+        "curb_cut_count": 14,
+        "tactile_block_count": 13,
+        "raised_crosswalk_count": 4,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 5.8,
+        "slope_percent_est": 0.35,
+        "slope_degree_est": 0.2,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_017",
+      "name": "미성동 주민센터",
+      "address": "전북특별자치도 군산시 공항로 371",
+      "lat": 35.95786821,
+      "lng": 126.6576242,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 5,
+        "nearest_distance_m": 89.6,
+        "pedestrian_signal_count": 3,
+        "curb_cut_count": 5,
+        "tactile_block_count": 5,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 5.0,
+        "slope_percent_est": 0.57,
+        "slope_degree_est": 0.33,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_018",
+      "name": "나운2동 주민센터",
+      "address": "전북특별자치도 군산시 나운3길 16",
+      "lat": 35.9648195,
+      "lng": 126.6996037,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 12,
+        "nearest_distance_m": 69.3,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 10,
+        "tactile_block_count": 1,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 8.1,
+        "slope_percent_est": 1.17,
+        "slope_degree_est": 0.67,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_019",
+      "name": "소룡동 동아아파트 앞 공원",
+      "address": "전북특별자치도 군산시 소룡동 1544번지",
+      "lat": 35.9695767,
+      "lng": 126.6835488,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 6,
+        "nearest_distance_m": 69.2,
+        "pedestrian_signal_count": 2,
+        "curb_cut_count": 6,
+        "tactile_block_count": 2,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 8
+      },
+      "elevation_slope": {
+        "elevation_m": 19.2,
+        "slope_percent_est": 4.68,
+        "slope_degree_est": 2.68,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 15,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": true,
+        "curb_cut_or_tactile": true,
+        "low_slope": true
+      }
+    },
+    {
+      "charger_id": "CHG_GS_020",
+      "name": "디오션시티 철길공원",
+      "address": "전북특별자치도 군산시 조촌동 3972번지",
+      "lat": 35.97777367,
+      "lng": 126.7432055,
+      "pedestrian_road": {
+        "nearby_within_300m": false,
+        "count_within_300m": 0,
+        "nearest_distance_m": null,
+        "score_bonus": 0,
+        "data_available_for_gunsan": false,
+        "note": "업로드된 국토교통부 C_UQ164_RO SHP에서 군산시 코드(45130/52130) 데이터가 확인되지 않아 0건 처리함."
+      },
+      "crosswalk": {
+        "count_within_150m": 0,
+        "nearest_distance_m": null,
+        "pedestrian_signal_count": 0,
+        "curb_cut_count": 0,
+        "tactile_block_count": 0,
+        "raised_crosswalk_count": 0,
+        "score_bonus": 0
+      },
+      "elevation_slope": {
+        "elevation_m": 5.7,
+        "slope_percent_est": 0.57,
+        "slope_degree_est": 0.33,
+        "slope_risk": "낮음",
+        "score_bonus": 7,
+        "source": "VWorld DEM 90m",
+        "note": "90m DEM 기반 충전소 주변 5x5 셀 고도차 추정치. 실제 보행 경로 경사도와 다를 수 있음."
+      },
+      "public_data_score_bonus_total": 7,
+      "public_data_flags": {
+        "pedestrian_road": false,
+        "crosswalk": false,
+        "curb_cut_or_tactile": false,
+        "low_slope": true
+      }
+    }
+  ]
+}
