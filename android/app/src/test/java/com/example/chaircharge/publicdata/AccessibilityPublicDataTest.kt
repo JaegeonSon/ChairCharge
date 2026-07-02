@@ -20,10 +20,6 @@ class AccessibilityPublicDataTest {
 
     @Test
     fun requiredAssetsParseWithExpectedCounts() {
-        val crosswalks = parse(
-            "crosswalks_gunsan_app.geojson",
-            CrosswalkFeatureCollection::class.java
-        )
         val elevation = parse(
             "elevation_slope_gunsan_app.json",
             ElevationSlopeFile::class.java
@@ -33,7 +29,6 @@ class AccessibilityPublicDataTest {
             ChargerAccessibilityContextFile::class.java
         )
 
-        assertEquals(3_989, crosswalks.features.size)
         assertEquals(20, elevation.items.size)
         assertEquals(20, contexts.items.size)
         assertTrue(contexts.items.all { it.crosswalk != null })

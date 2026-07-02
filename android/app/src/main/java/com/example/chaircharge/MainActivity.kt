@@ -2,8 +2,14 @@
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,11 +45,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -58,8 +63,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.example.chaircharge.accessibility.AccessibilityScoreResult
-import com.example.chaircharge.accessibility.calculateAccessibilityScore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.chaircharge.data.Charger
 import com.example.chaircharge.data.ChargerDataOrigin
 import com.example.chaircharge.data.ChargerRepository
@@ -68,9 +73,7 @@ import com.example.chaircharge.network.ApiConfig
 import com.example.chaircharge.network.tmap.TmapRouteRepository
 import com.example.chaircharge.network.tmap.TmapRouteRequest
 import com.example.chaircharge.publicdata.AccessibilityPublicDataSource
-import com.example.chaircharge.publicdata.ChargerAccessibilityContext
-import com.example.chaircharge.publicdata.Crosswalk
-import com.example.chaircharge.publicdata.findChargerAccessibilityContext
+import com.example.chaircharge.publicdata.ElevationSlopeInfo
 import com.example.chaircharge.ui.map.MapCameraRequest
 import com.example.chaircharge.ui.theme.ChairChargeTheme
 import com.example.chaircharge.ui.map.MapCoordinate
@@ -78,24 +81,38 @@ import com.example.chaircharge.ui.map.RouteLineRequest
 import com.example.chaircharge.ui.map.RouteLineType
 import com.example.chaircharge.ui.map.WheelChargeKakaoMap
 import com.google.android.gms.location.CurrentLocationRequest
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import kotlin.math.ceil
 
 private const val LOG_TAG = "WheelCharge"
-private const val NEAREST_PATH = "nearest"
 private const val TEST_LAT = 35.9676
 private const val TEST_LNG = 126.7368
-private const val NEAREST_LIMIT = 5
 private const val SELECTED_CHARGER_ZOOM_LEVEL = 16
-private const val CROSSWALK_LAYER_RADIUS_METERS = 1_000.0
-private const val CROSSWALK_LAYER_MAX_ITEMS = 250
+private const val NAVIGATION_LOCATION_INTERVAL_MS = 3_000L
+private const val NAVIGATION_MIN_LOCATION_INTERVAL_MS = 2_000L
+private const val NAVIGATION_ARRIVAL_DISTANCE_METERS = 30.0
+private const val NAVIGATION_OFF_ROUTE_DISTANCE_METERS = 50.0
+private const val NAVIGATION_SPEED_METERS_PER_HOUR = 4_000.0
+private const val TTS_DUPLICATE_COOLDOWN_MS = 5_000L
+private const val TTS_OFF_ROUTE_COOLDOWN_MS = 30_000L
+
+private enum class NavigationState {
+    IDLE,
+    ROUTE_LOADING,
+    NAVIGATING,
+    ARRIVED,
+    OFF_ROUTE,
+    ERROR
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,13 +134,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun WheelChargeScreen(modifier: Modifier = Modifier) {
-    var resultText by remember {
-        mutableStateOf(
-            "우측 상단 현재 위치 버튼을 눌러 가까운 충전소를 추천받을 수 있습니다."
-        )
-    }
     val scrollState = rememberScrollState()
-    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val fusedLocationClient = remember(context) {
         LocationServices.getFusedLocationProviderClient(context)
@@ -132,8 +143,11 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         ChargerRepository(context)
     }
     val tmapRouteRepository = remember { TmapRouteRepository() }
-    val accessibilityPublicDataSource = remember(context) {
+    val elevationSlopeDataSource = remember(context) {
         AccessibilityPublicDataSource(context)
+    }
+    var elevationSlopeItems by remember {
+        mutableStateOf(emptyList<ElevationSlopeInfo>())
     }
     var mapChargers by remember { mutableStateOf(emptyList<Charger>()) }
     var mapDataOrigin by remember { mutableStateOf<ChargerDataOrigin?>(null) }
@@ -158,8 +172,6 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
     var markerErrorMessage by remember { mutableStateOf<String?>(null) }
     var selectedCharger by remember { mutableStateOf<Charger?>(null) }
     var selectedChargerMapIndex by remember { mutableStateOf<Int?>(null) }
-    var selectedNearestIndex by remember { mutableStateOf<Int?>(null) }
-    var nearestChargers by remember { mutableStateOf(emptyList<Charger>()) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
     var cameraRequestSequence by remember { mutableStateOf(0L) }
     var mapInteractionMessage by remember { mutableStateOf<String?>(null) }
@@ -172,85 +184,531 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
     var routeMessage by remember { mutableStateOf<String?>(null) }
     var routeType by remember { mutableStateOf<RouteLineType?>(null) }
     var isRouteLoading by remember { mutableStateOf(false) }
-    var isBottomSheetExpanded by remember { mutableStateOf(true) }
-    var crosswalks by remember { mutableStateOf(emptyList<Crosswalk>()) }
-    var chargerAccessibilityContexts by remember {
-        mutableStateOf(emptyList<ChargerAccessibilityContext>())
+    var isBottomSheetExpanded by remember { mutableStateOf(false) }
+    var navigationState by remember { mutableStateOf(NavigationState.IDLE) }
+    var isNavigationMode by remember { mutableStateOf(false) }
+    var navigationTargetCharger by remember { mutableStateOf<Charger?>(null) }
+    var navigationRoutePoints by remember {
+        mutableStateOf(emptyList<MapCoordinate>())
     }
-    var accessibilityPublicDataLoaded by remember { mutableStateOf(false) }
-    var isCrosswalkLayerVisible by remember { mutableStateOf(false) }
-    var crosswalkLayerMarkerCount by remember { mutableStateOf(0) }
-    val accessibilityReferenceCoordinate = mapCurrentLocation
-        ?.takeIf { isValidCoordinate(it.lat, it.lng) }
-    val accessibilityReferenceLabel = if (accessibilityReferenceCoordinate != null) {
-        "현재 위치"
-    } else {
-        "현재 위치 미확인"
+    var navigationRemainingDistanceM by remember { mutableStateOf<Double?>(null) }
+    var navigationEstimatedTimeText by remember { mutableStateOf<String?>(null) }
+    var navigationStatusMessage by remember { mutableStateOf<String?>(null) }
+    var navigationStartPending by remember { mutableStateOf(false) }
+    var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
+    var isTtsInitialized by remember { mutableStateOf(false) }
+    var lastTtsMessage by remember { mutableStateOf<String?>(null) }
+    var lastTtsSpokenTime by remember { mutableStateOf(0L) }
+    var ttsUtteranceSequence by remember { mutableStateOf(0L) }
+    var hasSpokenStart by remember { mutableStateOf(false) }
+    var hasSpoken500m by remember { mutableStateOf(false) }
+    var hasSpoken300m by remember { mutableStateOf(false) }
+    var hasSpoken100m by remember { mutableStateOf(false) }
+    var hasSpokenArrived by remember { mutableStateOf(false) }
+    var lastOffRouteSpokenTime by remember { mutableStateOf(0L) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var isVoiceRecognitionActive by remember { mutableStateOf(false) }
+    val selectedDistanceText = remember(selectedCharger, mapCurrentLocation) {
+        formatDistanceFromCurrentLocation(
+            charger = selectedCharger,
+            currentLocation = mapCurrentLocation
+        )
     }
-    val selectedPublicDataMatch = remember(
+    val selectedDestinationSlopeRisk = remember(
         selectedCharger,
-        chargerAccessibilityContexts
+        elevationSlopeItems
     ) {
-        selectedCharger?.let { charger ->
-            findChargerAccessibilityContext(
-                charger = charger,
-                contexts = chargerAccessibilityContexts
-            )
-        }
+        findDestinationSlopeRisk(
+            charger = selectedCharger,
+            elevationSlopeItems = elevationSlopeItems
+        )
     }
-    val selectedPublicDataContext = selectedPublicDataMatch?.context
-    val selectedAccessibilityResult = remember(
-        selectedCharger,
-        accessibilityReferenceCoordinate,
-        selectedPublicDataContext
-    ) {
-        selectedCharger?.let { charger ->
-            accessibilityReferenceCoordinate?.let { reference ->
-                calculateAccessibilityForReference(
-                    charger = charger,
-                    reference = reference,
-                    publicDataContext = selectedPublicDataContext,
-                    basisLocationText = accessibilityReferenceLabel
-                )
-            } ?: calculateAccessibilityScore(
-                charger = charger,
-                distanceM = null,
-                context = selectedPublicDataContext,
-                basisLocationText = accessibilityReferenceLabel
-            )
-        }
-    }
-    val crosswalkLayerCenter = selectedCharger
-        ?.takeIf {
-            val lat = it.lat
-            val lng = it.lng
-            lat != null && lng != null && isValidCoordinate(lat, lng)
-        }
-        ?.let { MapCoordinate(requireNotNull(it.lat), requireNotNull(it.lng)) }
-        ?: mapCurrentLocation
-        ?: mapCenter
-    val displayedCrosswalkLocations = remember(
-        isCrosswalkLayerVisible,
-        crosswalks,
-        crosswalkLayerCenter
-    ) {
-        if (!isCrosswalkLayerVisible) {
-            emptyList()
-        } else {
-            crosswalks.asSequence()
-                .map { crosswalk ->
-                    crosswalk to haversineDistanceMeters(
-                        startLat = crosswalkLayerCenter.lat,
-                        startLng = crosswalkLayerCenter.lng,
-                        endLat = crosswalk.lat,
-                        endLng = crosswalk.lng
+
+    DisposableEffect(context) {
+        var disposed = false
+        lateinit var engine: TextToSpeech
+        engine = TextToSpeech(context.applicationContext) { status ->
+            if (!disposed) {
+                if (status == TextToSpeech.SUCCESS) {
+                    runCatching {
+                        val languageStatus = engine.setLanguage(Locale.KOREAN)
+                        check(
+                            languageStatus != TextToSpeech.LANG_MISSING_DATA &&
+                                languageStatus != TextToSpeech.LANG_NOT_SUPPORTED
+                        ) {
+                            "Korean TTS language is unavailable"
+                        }
+                        engine.setSpeechRate(0.95f)
+                        engine.setPitch(1.0f)
+                        isTtsInitialized = true
+                        Log.d(LOG_TAG, "TTS initialized")
+                    }.onFailure { exception ->
+                        isTtsInitialized = false
+                        Log.e(
+                            LOG_TAG,
+                            "TTS initialization failed",
+                            exception
+                        )
+                    }
+                } else {
+                    isTtsInitialized = false
+                    Log.e(
+                        LOG_TAG,
+                        "TTS initialization failed",
+                        IllegalStateException("TextToSpeech init status=$status")
                     )
                 }
-                .filter { it.second <= CROSSWALK_LAYER_RADIUS_METERS }
-                .sortedBy { it.second }
-                .take(CROSSWALK_LAYER_MAX_ITEMS)
-                .map { MapCoordinate(it.first.lat, it.first.lng) }
-                .toList()
+            }
+        }
+        textToSpeech = engine
+
+        onDispose {
+            disposed = true
+            isTtsInitialized = false
+            textToSpeech = null
+            runCatching {
+                engine.stop()
+                Log.d(LOG_TAG, "TTS stopped")
+            }.onFailure { exception ->
+                Log.e(LOG_TAG, "TTS stop failed", exception)
+            }
+            runCatching {
+                engine.shutdown()
+                Log.d(LOG_TAG, "TTS shutdown")
+            }.onFailure { exception ->
+                Log.e(LOG_TAG, "TTS shutdown failed", exception)
+            }
+        }
+    }
+
+    fun stopTtsPlayback() {
+        val engine = textToSpeech ?: return
+        runCatching {
+            engine.stop()
+            Log.d(LOG_TAG, "TTS stopped")
+        }.onFailure { exception ->
+            Log.e(LOG_TAG, "TTS stop failed", exception)
+        }
+    }
+
+    fun speakNavigationMessage(
+        message: String,
+        flushQueue: Boolean = false
+    ): Boolean {
+        val engine = textToSpeech
+        if (!isTtsInitialized || engine == null || message.isBlank()) {
+            return false
+        }
+        val now = System.currentTimeMillis()
+        if (
+            message == lastTtsMessage &&
+            now - lastTtsSpokenTime < TTS_DUPLICATE_COOLDOWN_MS
+        ) {
+            return false
+        }
+
+        return runCatching {
+            ttsUtteranceSequence += 1
+            val result = engine.speak(
+                message,
+                if (flushQueue) {
+                    TextToSpeech.QUEUE_FLUSH
+                } else {
+                    TextToSpeech.QUEUE_ADD
+                },
+                null,
+                "wheelcharge_navigation_$ttsUtteranceSequence"
+            )
+            check(result != TextToSpeech.ERROR) {
+                "TextToSpeech speak returned ERROR"
+            }
+            lastTtsMessage = message
+            lastTtsSpokenTime = now
+            Log.d(LOG_TAG, "TTS speak start")
+            true
+        }.getOrElse { exception ->
+            Log.e(LOG_TAG, "TTS speak failed", exception)
+            false
+        }
+    }
+
+    fun resetNavigationSpeechProgress() {
+        hasSpokenStart = false
+        hasSpoken500m = false
+        hasSpoken300m = false
+        hasSpoken100m = false
+        hasSpokenArrived = false
+        lastOffRouteSpokenTime = 0L
+        lastTtsMessage = null
+        lastTtsSpokenTime = 0L
+    }
+
+    fun speakNavigationStartIfNeeded() {
+        if (hasSpokenStart) {
+            return
+        }
+        val targetName = navigationTargetCharger
+            ?.name
+            ?.takeIf { it.isNotBlank() }
+            ?: "선택한 충전소"
+        if (
+            speakNavigationMessage(
+                "경로 안내를 시작합니다. 목적지는 ${targetName}입니다."
+            )
+        ) {
+            hasSpokenStart = true
+            Log.d(LOG_TAG, "TTS navigation start spoken")
+        }
+    }
+
+    fun speakDistanceGuideIfNeeded(remainingDistanceM: Double) {
+        val spoken = when {
+            remainingDistanceM <= 100.0 && !hasSpoken100m -> {
+                speakNavigationMessage(
+                    "목적지까지 약 100미터 남았습니다."
+                ).also { succeeded ->
+                    if (succeeded) {
+                        hasSpoken500m = true
+                        hasSpoken300m = true
+                        hasSpoken100m = true
+                    }
+                }
+            }
+            remainingDistanceM <= 300.0 && !hasSpoken300m -> {
+                speakNavigationMessage(
+                    "목적지까지 약 300미터 남았습니다."
+                ).also { succeeded ->
+                    if (succeeded) {
+                        hasSpoken500m = true
+                        hasSpoken300m = true
+                    }
+                }
+            }
+            remainingDistanceM <= 500.0 && !hasSpoken500m -> {
+                speakNavigationMessage(
+                    "목적지까지 약 500미터 남았습니다."
+                ).also { succeeded ->
+                    if (succeeded) {
+                        hasSpoken500m = true
+                    }
+                }
+            }
+            else -> false
+        }
+        if (spoken) {
+            Log.d(LOG_TAG, "TTS distance guide spoken")
+        }
+    }
+
+    fun speakArrivedIfNeeded() {
+        if (
+            !hasSpokenArrived &&
+            speakNavigationMessage(
+                "목적지 근처에 도착했습니다. 충전소 위치를 확인해 주세요."
+            )
+        ) {
+            hasSpokenArrived = true
+            Log.d(LOG_TAG, "TTS arrived spoken")
+        }
+    }
+
+    fun speakOffRouteIfAllowed() {
+        val now = System.currentTimeMillis()
+        if (
+            now - lastOffRouteSpokenTime >= TTS_OFF_ROUTE_COOLDOWN_MS &&
+            speakNavigationMessage(
+                "경로에서 벗어난 것으로 보입니다. 지도를 확인해 주세요."
+            )
+        ) {
+            lastOffRouteSpokenTime = now
+        }
+    }
+
+    LaunchedEffect(
+        isTtsInitialized,
+        navigationState,
+        navigationTargetCharger
+    ) {
+        if (!isTtsInitialized) {
+            return@LaunchedEffect
+        }
+        when (navigationState) {
+            NavigationState.NAVIGATING -> speakNavigationStartIfNeeded()
+            NavigationState.OFF_ROUTE -> {
+                speakNavigationStartIfNeeded()
+                speakOffRouteIfAllowed()
+            }
+            NavigationState.ARRIVED -> {
+                speakNavigationStartIfNeeded()
+                speakArrivedIfNeeded()
+            }
+            else -> Unit
+        }
+    }
+
+    val navigationLocationCallback = remember(fusedLocationClient) {
+        object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                if (!isNavigationMode) {
+                    return
+                }
+                val location = result.lastLocation ?: return
+                val currentLocation = MapCoordinate(
+                    lat = location.latitude,
+                    lng = location.longitude
+                )
+                if (!isValidCoordinate(currentLocation.lat, currentLocation.lng)) {
+                    navigationState = NavigationState.ERROR
+                    navigationStatusMessage = "현재 위치 정보가 올바르지 않습니다."
+                    isNavigationMode = false
+                    fusedLocationClient.removeLocationUpdates(this)
+                    Log.e(
+                        LOG_TAG,
+                        "Navigation error",
+                        IllegalArgumentException("Invalid navigation location")
+                    )
+                    return
+                }
+
+                Log.d(LOG_TAG, "Navigation location update received")
+                speakNavigationStartIfNeeded()
+                mapCurrentLocation = currentLocation
+                mapUsesCurrentLocation = true
+                myLocationErrorMessage = null
+
+                val target = navigationTargetCharger
+                val targetLat = target?.lat
+                val targetLng = target?.lng
+                if (
+                    targetLat == null ||
+                    targetLng == null ||
+                    !isValidCoordinate(targetLat, targetLng)
+                ) {
+                    navigationState = NavigationState.ERROR
+                    navigationStatusMessage = "목적지 위치 정보를 확인할 수 없습니다."
+                    isNavigationMode = false
+                    fusedLocationClient.removeLocationUpdates(this)
+                    Log.e(
+                        LOG_TAG,
+                        "Navigation error",
+                        IllegalStateException("Navigation target is unavailable")
+                    )
+                    return
+                }
+
+                val remainingDistance = haversineDistanceMeters(
+                    startLat = currentLocation.lat,
+                    startLng = currentLocation.lng,
+                    endLat = targetLat,
+                    endLng = targetLng
+                )
+                navigationRemainingDistanceM = remainingDistance
+                navigationEstimatedTimeText =
+                    calculateNavigationEstimatedTimeText(remainingDistance)
+                Log.d(
+                    LOG_TAG,
+                    "Navigation remaining distance: $remainingDistance"
+                )
+
+                if (remainingDistance <= NAVIGATION_ARRIVAL_DISTANCE_METERS) {
+                    navigationState = NavigationState.ARRIVED
+                    navigationStatusMessage =
+                        "목적지 근처에 도착했습니다. 충전소 위치를 확인해 주세요."
+                    speakArrivedIfNeeded()
+                    fusedLocationClient.removeLocationUpdates(this)
+                        .addOnCompleteListener {
+                            Log.d(
+                                LOG_TAG,
+                                "Navigation location updates removed"
+                            )
+                        }
+                    Log.d(LOG_TAG, "Navigation arrived")
+                    return
+                }
+
+                speakDistanceGuideIfNeeded(remainingDistance)
+                val offRoute = navigationRoutePoints.size > 2 &&
+                    isLocationOffRoute(
+                        currentLocation = currentLocation,
+                        routePoints = navigationRoutePoints,
+                        thresholdMeters = NAVIGATION_OFF_ROUTE_DISTANCE_METERS
+                    )
+                if (offRoute) {
+                    navigationState = NavigationState.OFF_ROUTE
+                    navigationStatusMessage =
+                        "경로에서 벗어난 것으로 보입니다. 지도를 확인해 주세요."
+                    speakOffRouteIfAllowed()
+                    Log.d(LOG_TAG, "Navigation off route detected")
+                } else {
+                    navigationState = NavigationState.NAVIGATING
+                    navigationStatusMessage = "경로 안내 중입니다. 지도를 확인해 주세요."
+                }
+            }
+        }
+    }
+
+    fun removeNavigationLocationUpdates() {
+        fusedLocationClient.removeLocationUpdates(navigationLocationCallback)
+            .addOnCompleteListener {
+                Log.d(LOG_TAG, "Navigation location updates removed")
+            }
+    }
+
+    fun stopNavigation(stopSpeech: Boolean = true) {
+        if (stopSpeech) {
+            stopTtsPlayback()
+        }
+        navigationStartPending = false
+        removeNavigationLocationUpdates()
+        navigationState = NavigationState.IDLE
+        isNavigationMode = false
+        navigationTargetCharger = null
+        navigationRoutePoints = emptyList()
+        navigationRemainingDistanceM = null
+        navigationEstimatedTimeText = null
+        navigationStatusMessage = null
+        resetNavigationSpeechProgress()
+        Log.d(LOG_TAG, "Navigation stopped")
+    }
+
+    fun stopNavigationWithSpeech() {
+        stopTtsPlayback()
+        speakNavigationMessage(
+            message = "경로 안내를 종료합니다.",
+            flushQueue = true
+        )
+        stopNavigation(stopSpeech = false)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startNavigationLocationUpdates() {
+        val fineLocationGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseLocationGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineLocationGranted && !coarseLocationGranted) {
+            navigationStartPending = false
+            navigationState = NavigationState.ERROR
+            isNavigationMode = false
+            navigationStatusMessage = "현재 위치를 먼저 확인해 주세요."
+            speakNavigationMessage("현재 위치를 먼저 확인해 주세요.")
+            Log.e(
+                LOG_TAG,
+                "Navigation error",
+                SecurityException("Location permission is not granted")
+            )
+            return
+        }
+
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            NAVIGATION_LOCATION_INTERVAL_MS
+        )
+            .setMinUpdateIntervalMillis(NAVIGATION_MIN_LOCATION_INTERVAL_MS)
+            .build()
+        fusedLocationClient.requestLocationUpdates(
+            request,
+            navigationLocationCallback,
+            Looper.getMainLooper()
+        ).addOnSuccessListener {
+            if (!navigationStartPending) {
+                removeNavigationLocationUpdates()
+                return@addOnSuccessListener
+            }
+            navigationStartPending = false
+            navigationState = NavigationState.NAVIGATING
+            isNavigationMode = true
+            navigationStatusMessage = "경로 안내 중입니다. 지도를 확인해 주세요."
+            speakNavigationStartIfNeeded()
+            Log.d(LOG_TAG, "Navigation mode started")
+        }.addOnFailureListener { exception ->
+            navigationStartPending = false
+            navigationState = NavigationState.ERROR
+            isNavigationMode = false
+            navigationStatusMessage = "위치 업데이트를 시작하지 못했습니다."
+            Log.e(LOG_TAG, "Navigation error", exception)
+        }
+    }
+
+    fun activateNavigationWithRoute(
+        target: Charger,
+        routePoints: List<MapCoordinate>
+    ) {
+        if (!navigationStartPending) {
+            return
+        }
+        val currentLocation = mapCurrentLocation
+        val targetLat = target.lat
+        val targetLng = target.lng
+        if (
+            currentLocation == null ||
+            targetLat == null ||
+            targetLng == null ||
+            !isValidCoordinate(currentLocation.lat, currentLocation.lng) ||
+            !isValidCoordinate(targetLat, targetLng)
+        ) {
+            navigationStartPending = false
+            navigationState = NavigationState.ERROR
+            isNavigationMode = false
+            navigationStatusMessage = "현재 위치를 먼저 확인해 주세요."
+            speakNavigationMessage("현재 위치를 먼저 확인해 주세요.")
+            Log.e(
+                LOG_TAG,
+                "Navigation error",
+                IllegalStateException("Navigation start coordinates unavailable")
+            )
+            return
+        }
+
+        navigationTargetCharger = target
+        navigationRoutePoints = routePoints
+        val remainingDistance = haversineDistanceMeters(
+            startLat = currentLocation.lat,
+            startLng = currentLocation.lng,
+            endLat = targetLat,
+            endLng = targetLng
+        )
+        navigationRemainingDistanceM = remainingDistance
+        navigationEstimatedTimeText =
+            calculateNavigationEstimatedTimeText(remainingDistance)
+
+        if (remainingDistance <= NAVIGATION_ARRIVAL_DISTANCE_METERS) {
+            navigationStartPending = false
+            navigationState = NavigationState.ARRIVED
+            isNavigationMode = true
+            navigationStatusMessage =
+                "목적지 근처에 도착했습니다. 충전소 위치를 확인해 주세요."
+            speakNavigationStartIfNeeded()
+            speakArrivedIfNeeded()
+            Log.d(LOG_TAG, "Navigation mode started")
+            Log.d(LOG_TAG, "Navigation arrived")
+            return
+        }
+
+        navigationState = NavigationState.ROUTE_LOADING
+        navigationStatusMessage = "위치 업데이트를 시작하는 중입니다."
+        startNavigationLocationUpdates()
+    }
+
+    DisposableEffect(context, fusedLocationClient, navigationLocationCallback) {
+        val activity = context as? ComponentActivity
+        val observer = LifecycleEventObserver { _, event ->
+            if (
+                event == Lifecycle.Event.ON_STOP &&
+                (isNavigationMode || navigationStartPending)
+            ) {
+                stopNavigation()
+            }
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose {
+            activity?.lifecycle?.removeObserver(observer)
+            fusedLocationClient.removeLocationUpdates(navigationLocationCallback)
+            Log.d(LOG_TAG, "Navigation location updates removed")
         }
     }
 
@@ -306,6 +764,9 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         routeSourceText = "경로: 위치 확인용 직선 경로"
         routeMessage =
             "실제 보행자 경로를 불러오지 못해 위치 확인용 직선 경로를 표시합니다."
+        speakNavigationMessage(
+            "보행자 경로를 불러오지 못해 직선 경로를 표시합니다."
+        )
         routeType = RouteLineType.FALLBACK_STRAIGHT
         isRouteLoading = false
         isRouteVisible = true
@@ -314,6 +775,13 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             points = listOf(start, end),
             type = RouteLineType.FALLBACK_STRAIGHT
         )
+        navigationTargetCharger?.let { target ->
+            activateNavigationWithRoute(
+                target = target,
+                routePoints = listOf(start, end)
+            )
+        }
+        Log.d(LOG_TAG, "Route fallback used")
         Log.d(LOG_TAG, "fallback straight route used")
         Log.d(
             LOG_TAG,
@@ -324,12 +792,14 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
     fun applySelectedCharger(
         charger: Charger,
         mapIndex: Int?,
-        source: String,
-        nearestIndex: Int? = null
+        source: String
     ) {
         val selectionChanged =
             selectedCharger?.let { !sameCharger(it, charger) } == true
         if (selectionChanged) {
+            if (isNavigationMode || navigationStartPending) {
+                stopNavigation()
+            }
             clearRoute(reason = "선택 충전소 변경")
         }
 
@@ -348,9 +818,6 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             reason = "충전소 선택"
         )
         selectedChargerMapIndex = mapIndex
-        selectedNearestIndex = nearestIndex
-            ?: nearestChargers.indexOfFirst { sameCharger(it, charger) }
-                .takeIf { it >= 0 }
 
         Log.d(LOG_TAG, "selectedCharger 설정 성공 여부: true")
         Log.d(
@@ -406,6 +873,7 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             clearRoute(reason = "현재 위치 미확인")
             routeMessage =
                 "경로 안내를 위해 우측 상단 현재 위치 버튼을 눌러 주세요."
+            speakNavigationMessage("현재 위치를 먼저 확인해 주세요.")
             val exception = IllegalStateException(
                 "경로 출발점으로 사용할 현재 위치가 없습니다."
             )
@@ -417,12 +885,18 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         clearRoute(reason = "새 TMAP 경로 요청")
         val requestId = routeRequestSequence
         isRouteLoading = true
-        routeSourceText = "경로: TMAP 보행자 경로\n옵션: 계단 제외 우선"
+        routeSourceText = "경로: TMAP 보행자 경로"
         routeDistanceText = null
         routeDurationText = null
         routeMessage = "경로를 불러오는 중입니다..."
 
-        tmapRouteRepository.requestPedestrianRoute(
+        val directDistanceM = haversineDistanceMeters(
+            startLat = start.lat,
+            startLng = start.lng,
+            endLat = end.lat,
+            endLng = end.lng
+        )
+        tmapRouteRepository.requestBestPedestrianRoute(
             request = TmapRouteRequest(
                 startX = start.lng,
                 startY = start.lat,
@@ -430,15 +904,18 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                 endY = end.lat,
                 startName = "현재 위치",
                 endName = charger.name,
-            )
+            ),
+            directDistanceM = directDistanceM,
+            destinationSlopeRisk = selectedDestinationSlopeRisk
         ) { result ->
             if (requestId != routeRequestSequence) {
                 Log.d(LOG_TAG, "TMAP route result ignored: stale request")
-                return@requestPedestrianRoute
+                return@requestBestPedestrianRoute
             }
             result.fold(
-                onSuccess = { route ->
-                    val points = route.routePoints.map { point ->
+                onSuccess = { selection ->
+                    val selectedRoute = selection.selectedRoute
+                    val points = selectedRoute.routePoints.map { point ->
                         MapCoordinate(lat = point.lat, lng = point.lng)
                     }
                     if (points.size < 2) {
@@ -449,15 +926,14 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                         showStraightRouteFallback(start, end, requestId)
                         return@fold
                     }
-                    routeDistanceText = route.totalDistanceM?.let { distance ->
+                    routeDistanceText = selectedRoute.distanceM?.let { distance ->
                         "거리: ${formatDistance(distance)}"
                     } ?: "거리: 정보 없음"
-                    routeDurationText = route.totalDurationS?.let { seconds ->
+                    routeDurationText = selectedRoute.durationS?.let { seconds ->
                         val minutes = ceil(seconds / 60.0).toInt().coerceAtLeast(1)
                         "예상 시간: 약 ${minutes}분"
                     } ?: "예상 시간: 정보 없음"
-                    routeSourceText =
-                        "경로: TMAP 보행자 경로\n옵션: 계단 제외 우선"
+                    routeSourceText = "경로: TMAP 보행자 경로"
                     routeMessage = "실제 보행자 경로를 표시합니다."
                     routeType = RouteLineType.TMAP_PEDESTRIAN
                     isRouteLoading = false
@@ -467,6 +943,12 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                         points = points,
                         type = RouteLineType.TMAP_PEDESTRIAN
                     )
+                    navigationTargetCharger?.let { target ->
+                        activateNavigationWithRoute(
+                            target = target,
+                            routePoints = points
+                        )
+                    }
                     Log.d(
                         LOG_TAG,
                         "TMAP route success: requestId=$requestId, " +
@@ -474,73 +956,343 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                     )
                 },
                 onFailure = { exception ->
-                    Log.e(LOG_TAG, "TMAP route failed", exception)
+                    Log.e(LOG_TAG, "TMAP route candidates failed", exception)
                     showStraightRouteFallback(start, end, requestId)
                 }
             )
         }
     }
 
-    fun selectNearestCharger(charger: Charger, nearestIndex: Int) {
-        Log.d(LOG_TAG, "TOP 5 항목 클릭 감지: index=$nearestIndex")
-        Log.d(
-            LOG_TAG,
-            "클릭한 충전소 식별값: id=${charger.id}, index=$nearestIndex"
-        )
-        Log.d(LOG_TAG, "클릭한 충전소 시설명: ${charger.name}")
-        Log.d(
-            LOG_TAG,
-            "클릭한 충전소 좌표: lat=${charger.lat}, lng=${charger.lng}"
-        )
-
-        val match = findMatchingMapCharger(
-            mapChargers = mapChargers,
-            target = charger,
-            fallbackIndex = nearestIndex
-        )
-        Log.d(
-            LOG_TAG,
-            "충전소 객체 매칭 결과: strategy=${match?.strategy ?: "none"}, " +
-                "mapIndex=${match?.index}"
-        )
-        applySelectedCharger(
-            charger = charger,
-            mapIndex = match?.index,
-            source = "TOP_5_LIST",
-            nearestIndex = nearestIndex
-        )
-
-        coroutineScope.launch {
-            scrollState.animateScrollTo(0)
-        }
-
-        val lat = charger.lat
-        val lng = charger.lng
-        if (lat == null || lng == null || !isValidCoordinate(lat, lng)) {
-            mapInteractionMessage =
-                "이 충전소는 좌표 정보가 없어 지도에서 이동할 수 없습니다."
-            val exception = IllegalArgumentException(
-                "유효하지 않은 충전소 좌표: lat=$lat, lng=$lng"
+    fun requestNavigationStart() {
+        Log.d(LOG_TAG, "Navigation start requested")
+        val charger = selectedCharger
+        if (charger == null) {
+            navigationState = NavigationState.ERROR
+            navigationStatusMessage = "경로를 안내할 충전소를 먼저 선택해 주세요."
+            Log.e(
+                LOG_TAG,
+                "Navigation error",
+                IllegalStateException("Navigation target is not selected")
             )
-            Log.e(LOG_TAG, "지도 카메라 이동 실패", exception)
             return
         }
 
-        if (match == null) {
-            mapInteractionMessage = "선택한 충전소 마커를 찾지 못했습니다."
-            Log.w(LOG_TAG, "선택 마커 강조 적용 여부: false - 매칭 실패")
+        val currentLocation = mapCurrentLocation?.takeIf {
+            isValidCoordinate(it.lat, it.lng)
+        }
+        if (currentLocation == null) {
+            navigationState = NavigationState.ERROR
+            navigationStatusMessage = "현재 위치를 먼저 확인해 주세요."
+            speakNavigationMessage("현재 위치를 먼저 확인해 주세요.")
+            Log.e(
+                LOG_TAG,
+                "Navigation error",
+                IllegalStateException("Current location is unavailable")
+            )
+            return
         }
 
+        val targetLat = charger.lat
+        val targetLng = charger.lng
+        if (
+            targetLat == null ||
+            targetLng == null ||
+            !isValidCoordinate(targetLat, targetLng)
+        ) {
+            navigationState = NavigationState.ERROR
+            navigationStatusMessage = "충전소 위치 정보를 확인할 수 없습니다."
+            Log.e(
+                LOG_TAG,
+                "Navigation error",
+                IllegalArgumentException("Navigation target coordinates invalid")
+            )
+            return
+        }
+
+        resetNavigationSpeechProgress()
+        navigationTargetCharger = charger
+        navigationStartPending = true
+        navigationState = NavigationState.ROUTE_LOADING
+        navigationStatusMessage = "경로를 준비하는 중입니다."
+        val initialDistance = haversineDistanceMeters(
+            startLat = currentLocation.lat,
+            startLng = currentLocation.lng,
+            endLat = targetLat,
+            endLng = targetLng
+        )
+        navigationRemainingDistanceM = initialDistance
+        navigationEstimatedTimeText =
+            calculateNavigationEstimatedTimeText(initialDistance)
+
+        val existingRoute = routeLineRequest
+            ?.takeIf { it.points.size >= 2 }
+        if (existingRoute != null) {
+            activateNavigationWithRoute(
+                target = charger,
+                routePoints = existingRoute.points
+            )
+        } else {
+            showRouteToSelectedCharger()
+        }
+    }
+
+    fun handleRecognizedVoiceCommand(command: String) {
+        val compactCommand = command
+            .lowercase(Locale.KOREAN)
+            .replace(" ", "")
+        val requestsNearestCharger =
+            compactCommand.contains("가까운") &&
+                compactCommand.contains("충전소")
+        val requestsNavigation =
+            compactCommand.contains("충전소") &&
+                listOf("추천", "안내", "경로", "시작")
+                    .any(compactCommand::contains)
+        if (!requestsNearestCharger && !requestsNavigation) {
+            speakNavigationMessage(
+                "가까운 충전소 안내라고 말씀해 주세요.",
+                flushQueue = true
+            )
+            return
+        }
+
+        val currentLocation = mapCurrentLocation?.takeIf {
+            isValidCoordinate(it.lat, it.lng)
+        }
+        if (currentLocation == null) {
+            navigationState = NavigationState.ERROR
+            navigationStatusMessage = "현재 위치를 먼저 확인해 주세요."
+            speakNavigationMessage(
+                "현재 위치를 먼저 확인해 주세요.",
+                flushQueue = true
+            )
+            return
+        }
+
+        val nearestMatch = mapChargers.mapIndexedNotNull { index, charger ->
+            val lat = charger.lat
+            val lng = charger.lng
+            if (
+                lat == null ||
+                lng == null ||
+                !isValidCoordinate(lat, lng)
+            ) {
+                null
+            } else {
+                val distance = haversineDistanceMeters(
+                    startLat = currentLocation.lat,
+                    startLng = currentLocation.lng,
+                    endLat = lat,
+                    endLng = lng
+                )
+                ChargerMatch(
+                    charger = charger,
+                    index = index,
+                    strategy = "voice-nearest:$distance"
+                )
+            }
+        }.minByOrNull { match ->
+            val lat = requireNotNull(match.charger.lat)
+            val lng = requireNotNull(match.charger.lng)
+            haversineDistanceMeters(
+                startLat = currentLocation.lat,
+                startLng = currentLocation.lng,
+                endLat = lat,
+                endLng = lng
+            )
+        }
+        if (nearestMatch == null) {
+            speakNavigationMessage(
+                "충전소 정보를 불러오지 못했습니다.",
+                flushQueue = true
+            )
+            return
+        }
+
+        val charger = nearestMatch.charger
+        applySelectedCharger(
+            charger = charger,
+            mapIndex = nearestMatch.index,
+            source = "VOICE_RECOGNITION"
+        )
+        val lat = requireNotNull(charger.lat)
+        val lng = requireNotNull(charger.lng)
         cameraRequestSequence += 1
         cameraRequest = MapCameraRequest(
             requestId = cameraRequestSequence,
             target = MapCoordinate(lat = lat, lng = lng),
             zoomLevel = SELECTED_CHARGER_ZOOM_LEVEL
         )
-        Log.d(
-            LOG_TAG,
-            "지도 카메라 이동 시도 예약: requestId=$cameraRequestSequence"
-        )
+        requestNavigationStart()
+    }
+
+    DisposableEffect(context) {
+        val activity = context as? ComponentActivity
+        var recognizer: SpeechRecognizer? = null
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            recognizer = runCatching {
+                SpeechRecognizer.createSpeechRecognizer(context).also {
+                    it.setRecognitionListener(
+                        object : RecognitionListener {
+                            override fun onReadyForSpeech(params: Bundle?) {
+                                isVoiceRecognitionActive = true
+                                Log.d(LOG_TAG, "Voice recognition ready")
+                            }
+
+                            override fun onBeginningOfSpeech() = Unit
+
+                            override fun onRmsChanged(rmsdB: Float) = Unit
+
+                            override fun onBufferReceived(
+                                buffer: ByteArray?
+                            ) = Unit
+
+                            override fun onEndOfSpeech() = Unit
+
+                            override fun onError(error: Int) {
+                                val wasActive = isVoiceRecognitionActive
+                                isVoiceRecognitionActive = false
+                                if (
+                                    error == SpeechRecognizer.ERROR_CLIENT &&
+                                    !wasActive
+                                ) {
+                                    return
+                                }
+                                val message = when (error) {
+                                    SpeechRecognizer.ERROR_NO_MATCH,
+                                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                                        "음성 명령을 인식하지 못했습니다. 다시 말씀해 주세요."
+                                    else -> "음성 인식을 사용할 수 없습니다."
+                                }
+                                speakNavigationMessage(
+                                    message = message,
+                                    flushQueue = true
+                                )
+                                Log.e(
+                                    LOG_TAG,
+                                    "Voice recognition error: code=$error"
+                                )
+                            }
+
+                            override fun onResults(results: Bundle?) {
+                                isVoiceRecognitionActive = false
+                                val command = results
+                                    ?.getStringArrayList(
+                                        SpeechRecognizer.RESULTS_RECOGNITION
+                                    )
+                                    ?.firstOrNull()
+                                    ?.takeIf { it.isNotBlank() }
+                                if (command == null) {
+                                    speakNavigationMessage(
+                                        "음성 명령을 인식하지 못했습니다. 다시 말씀해 주세요.",
+                                        flushQueue = true
+                                    )
+                                } else {
+                                    Log.d(
+                                        LOG_TAG,
+                                        "Voice recognition result received"
+                                    )
+                                    handleRecognizedVoiceCommand(command)
+                                }
+                            }
+
+                            override fun onPartialResults(
+                                partialResults: Bundle?
+                            ) = Unit
+
+                            override fun onEvent(
+                                eventType: Int,
+                                params: Bundle?
+                            ) = Unit
+                        }
+                    )
+                }
+            }.onFailure { exception ->
+                Log.e(
+                    LOG_TAG,
+                    "Voice recognition initialization failed",
+                    exception
+                )
+            }.getOrNull()
+        }
+        speechRecognizer = recognizer
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                isVoiceRecognitionActive = false
+                recognizer?.cancel()
+            }
+        }
+        activity?.lifecycle?.addObserver(observer)
+
+        onDispose {
+            activity?.lifecycle?.removeObserver(observer)
+            isVoiceRecognitionActive = false
+            speechRecognizer = null
+            runCatching {
+                recognizer?.cancel()
+                recognizer?.destroy()
+            }.onFailure { exception ->
+                Log.e(LOG_TAG, "Voice recognition cleanup failed", exception)
+            }
+        }
+    }
+
+    fun startVoiceRecognition() {
+        if (isNavigationMode || navigationStartPending) {
+            speakNavigationMessage(
+                "경로 안내를 종료한 후 음성 명령을 사용해 주세요.",
+                flushQueue = true
+            )
+            return
+        }
+        val recognizer = speechRecognizer
+        if (
+            recognizer == null ||
+            !SpeechRecognizer.isRecognitionAvailable(context)
+        ) {
+            speakNavigationMessage(
+                "음성 인식을 사용할 수 없습니다.",
+                flushQueue = true
+            )
+            return
+        }
+
+        stopTtsPlayback()
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ko-KR")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        }
+        runCatching {
+            isVoiceRecognitionActive = true
+            recognizer.startListening(intent)
+            Log.d(LOG_TAG, "Voice recognition started")
+        }.onFailure { exception ->
+            isVoiceRecognitionActive = false
+            speakNavigationMessage(
+                "음성 인식을 시작하지 못했습니다.",
+                flushQueue = true
+            )
+            Log.e(LOG_TAG, "Voice recognition start failed", exception)
+        }
+    }
+
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startVoiceRecognition()
+        } else {
+            speakNavigationMessage(
+                "음성 인식을 사용하려면 마이크 권한을 허용해 주세요.",
+                flushQueue = true
+            )
+        }
     }
 
     fun loadMapChargers() {
@@ -610,7 +1362,7 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             mapCurrentLocation = null
             myLocationDisplaySucceeded = false
             myLocationErrorMessage =
-                "위치 권한을 허용하면 가까운 충전소를 추천받을 수 있습니다."
+                "현재 위치를 표시하려면 위치 권한을 허용해 주세요."
             Log.d(LOG_TAG, "현재 위치 사용 여부: false - 기본 위치 사용(권한 없음)")
             return
         }
@@ -656,49 +1408,11 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    fun loadNearestForCurrentLocation(lat: Double, lng: Double) {
-        nearestChargers = emptyList()
-        val requestUrl = buildNearestApiUrl(lat, lng)
-        resultText = "현재 위치 기준 가까운 충전소를 불러오는 중입니다..."
-        Log.d(LOG_TAG, "현재 Base URL: ${ApiConfig.BASE_URL}")
-        Log.d(LOG_TAG, "현재 위치 좌표: lat=$lat, lng=$lng")
-        Log.d(LOG_TAG, "호출 API: /$NEAREST_PATH")
-
-        chargerRepository.loadNearestChargers(
-            lat = lat,
-            lng = lng,
-            limit = NEAREST_LIMIT
-        ) { result ->
-            result.fold(
-                onSuccess = { loadResult ->
-                    nearestChargers = loadResult.chargers.take(NEAREST_LIMIT)
-                    resultText = buildCurrentLocationNearestHeaderText(
-                        chargers = loadResult.chargers,
-                        origin = loadResult.origin
-                    )
-                    Log.d(
-                        LOG_TAG,
-                        "현재 위치 기준 응답 개수: ${loadResult.chargers.size}"
-                    )
-                    Log.d(
-                        LOG_TAG,
-                        "현재 위치 기반 추천 갱신: count=${nearestChargers.size}, " +
-                            "source=${formatDataOrigin(loadResult.origin)}"
-                    )
-                },
-                onFailure = { exception ->
-                    resultText = "가까운 충전소 추천을 불러오지 못했습니다."
-                    Log.e(LOG_TAG, "현재 위치 기준 데이터 로드 최종 실패", exception)
-                }
-            )
-        }
-    }
-
     @SuppressLint("MissingPermission")
     fun fetchCurrentLocation() {
-        clearRoute(reason = "현재 위치 재측정")
-        nearestChargers = emptyList()
-        resultText = "현재 위치를 확인하는 중입니다..."
+        if (!isNavigationMode && !navigationStartPending) {
+            clearRoute(reason = "현재 위치 재측정")
+        }
         mapInteractionMessage = null
         myLocationErrorMessage = null
         Log.d(LOG_TAG, "현재 위치 재측정 시작")
@@ -714,7 +1428,6 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             CancellationTokenSource().token
         ).addOnSuccessListener { location ->
             if (location == null) {
-                resultText = "현재 위치를 확인할 수 없습니다."
                 mapUsesCurrentLocation = false
                 mapCurrentLocation = null
                 myLocationDisplaySucceeded = false
@@ -742,9 +1455,7 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                 "현재 위치 재측정 성공: lat=${location.latitude}, " +
                     "lng=${location.longitude}"
             )
-            loadNearestForCurrentLocation(location.latitude, location.longitude)
         }.addOnFailureListener { exception ->
-            resultText = "현재 위치를 확인할 수 없습니다."
             mapUsesCurrentLocation = false
             mapCurrentLocation = null
             myLocationDisplaySucceeded = false
@@ -772,82 +1483,23 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         if (locationGranted) {
             fetchCurrentLocation()
         } else {
-            resultText =
-                "위치 권한을 허용하면 가까운 충전소를 추천받을 수 있습니다."
             mapCurrentLocation = null
             mapUsesCurrentLocation = false
             myLocationDisplaySucceeded = false
             myLocationErrorMessage =
-                "위치 권한을 허용하면 가까운 충전소를 추천받을 수 있습니다."
+                "현재 위치를 표시하려면 위치 권한을 허용해 주세요."
             Log.d(LOG_TAG, "현재 위치 재측정 실패: 위치 권한 거부")
         }
     }
 
-    LaunchedEffect(
-        selectedCharger,
-        accessibilityReferenceCoordinate,
-        accessibilityReferenceLabel,
-        selectedPublicDataContext
-    ) {
-        val charger = selectedCharger ?: return@LaunchedEffect
-        try {
-            Log.d(LOG_TAG, "통합 접근성 점수 계산 시작")
-            Log.d(LOG_TAG, "선택한 충전소 식별값: id=${charger.id}")
-            Log.d(LOG_TAG, "선택한 충전소 시설명: ${charger.name}")
-            Log.d(
-                LOG_TAG,
-                "접근성 기준 위치: $accessibilityReferenceLabel"
-            )
-            if (selectedPublicDataMatch != null) {
-                Log.d(
-                    LOG_TAG,
-                    "선택 충전소 context 매칭 성공: " +
-                        "strategy=${selectedPublicDataMatch.strategy}"
-                )
-            } else {
-                Log.w(
-                    LOG_TAG,
-                    "선택 충전소 context 매칭 실패: id=${charger.id}"
-                )
+    LaunchedEffect(elevationSlopeDataSource) {
+        elevationSlopeItems = try {
+            withContext(Dispatchers.IO) {
+                elevationSlopeDataSource.loadElevationSlopeItems()
             }
-            val result = selectedAccessibilityResult ?: return@LaunchedEffect
-            Log.d(
-                LOG_TAG,
-                "계산된 거리: ${result.distanceM?.let(::formatDistance) ?: "계산 불가"}"
-            )
-            Log.d(
-                LOG_TAG,
-                "거리 접근성 점수: ${result.breakdown.distanceScore}/30"
-            )
-            Log.d(
-                LOG_TAG,
-                "충전소 정보 점수: ${result.breakdown.chargerInfoScore}/20"
-            )
-            Log.d(
-                LOG_TAG,
-                "횡단보도 접근성 점수: ${result.breakdown.crosswalkScore}/20"
-            )
-            Log.d(
-                LOG_TAG,
-                "경사도/고도 안전성 점수: ${result.breakdown.slopeScore}/20"
-            )
-            Log.d(
-                LOG_TAG,
-                "이용 편의성 점수: ${result.breakdown.convenienceScore}/10"
-            )
-            Log.d(LOG_TAG, "최종 통합 점수: ${result.totalScore}/100")
-            Log.d(LOG_TAG, "추천 등급: ${result.grade}")
-            Log.d(LOG_TAG, "추천 사유 개수: ${result.reasons.size}")
-            Log.d(
-                LOG_TAG,
-                "접근성 점수 표시: ${result.totalScore}점, ${result.grade}"
-            )
-            Log.d(
-                LOG_TAG,
-                "상세정보 패널 표시: id=${charger.id}, name=${charger.name}"
-            )
         } catch (exception: Exception) {
-            Log.e(LOG_TAG, "접근성 점수 계산 실패", exception)
+            Log.e(LOG_TAG, "Elevation slope data load failed", exception)
+            emptyList()
         }
     }
 
@@ -855,14 +1507,13 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
         Log.d(LOG_TAG, "UI 최종 정리 적용")
         Log.d(
             LOG_TAG,
-            "삭제된 개발용 버튼 목록: 서버 상태 확인, 전체 충전소, " +
-                "테스트 위치 추천, 현재 위치 추천"
+            "삭제된 개발용 버튼 목록: 서버 상태 확인, 전체 충전소"
         )
         Log.d(LOG_TAG, "테스트 좌표 UI 제거 여부: true")
         Log.d(
             LOG_TAG,
-            "기존 기능 유지 여부: 지도, 마커, 위치, 추천, 상세, 점수, " +
-                "경로, 횡단보도, 로컬 fallback 유지"
+            "기존 기능 유지 여부: 지도, 마커, 위치, 상세, 경로, " +
+                "로컬 fallback 유지"
         )
         Log.d(LOG_TAG, "UI 초기화")
         Log.d(LOG_TAG, "bottom sheet 스타일 적용")
@@ -879,22 +1530,6 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             "지도 초기 좌표: lat=$TEST_LAT, lng=$TEST_LNG"
         )
         tryUseCurrentLocationForMap()
-    }
-
-    LaunchedEffect(accessibilityPublicDataSource) {
-        try {
-            val bundle = withContext(Dispatchers.IO) {
-                accessibilityPublicDataSource.loadAll()
-            }
-            crosswalks = bundle.crosswalks
-            chargerAccessibilityContexts = bundle.chargerContexts
-            accessibilityPublicDataLoaded = true
-        } catch (exception: Exception) {
-            crosswalks = emptyList()
-            chargerAccessibilityContexts = emptyList()
-            accessibilityPublicDataLoaded = true
-            Log.e(LOG_TAG, "접근성 공공데이터 assets 로드 실패", exception)
-        }
     }
 
     LaunchedEffect(
@@ -927,7 +1562,6 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                 selectedChargerIndex = selectedChargerMapIndex,
                 cameraRequest = cameraRequest,
                 routeLineRequest = routeLineRequest,
-                crosswalkLocations = displayedCrosswalkLocations,
                 modifier = Modifier
                     .fillMaxSize(),
                 onMapViewCreated = {
@@ -1027,53 +1661,31 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 },
-                onCrosswalksDisplayed = { count ->
-                    crosswalkLayerMarkerCount = count
-                },
-                onCrosswalkLayerError = { exception ->
-                    mapInteractionMessage =
-                        "횡단보도 위치를 지도에 표시하지 못했습니다."
-                    Log.e(LOG_TAG, "횡단보도 레이어 표시 실패", exception)
-                },
-                onChargerMarkerClick = { chargerId, index ->
-                    val indexedCharger = mapChargers.getOrNull(index)
-                        ?.takeIf { it.id == chargerId }
-                    val matchedCharger = indexedCharger
-                        ?: mapChargers.firstOrNull { it.id == chargerId }
-
+                onChargerMarkerClick = { charger, index ->
                     Log.d(
                         LOG_TAG,
-                        "매칭된 Charger 식별값: id=$chargerId, index=$index"
+                        "마커 Charger 선택: id=${charger.id}, index=$index"
                     )
-
-                    if (matchedCharger != null) {
-                        applySelectedCharger(
-                            charger = matchedCharger,
-                            mapIndex = mapChargers.indexOf(matchedCharger),
-                            source = "MAP_MARKER"
-                        )
-                        mapInteractionMessage = "충전소를 선택했습니다."
-                        Log.d(
-                            LOG_TAG,
-                            "매칭된 Charger 시설명: ${matchedCharger.name}"
-                        )
-                        Log.d(LOG_TAG, "selectedCharger 설정 성공 여부: true")
-                    } else {
-                        clearRoute(reason = "마커 Charger 매칭 실패")
-                        selectedCharger = null
-                        selectedChargerMapIndex = null
-                        selectedNearestIndex = null
-                        mapInteractionMessage =
-                            "선택한 충전소 마커를 찾지 못했습니다."
-                        val exception = IllegalStateException(
-                            "클릭한 마커에 대응하는 Charger를 찾지 못했습니다."
-                        )
-                        Log.e(
-                            LOG_TAG,
-                            "selectedCharger 설정 성공 여부: false",
-                            exception
+                    applySelectedCharger(
+                        charger = charger,
+                        mapIndex = index,
+                        source = "MAP_MARKER"
+                    )
+                    val lat = charger.lat
+                    val lng = charger.lng
+                    if (
+                        lat != null &&
+                        lng != null &&
+                        isValidCoordinate(lat, lng)
+                    ) {
+                        cameraRequestSequence += 1
+                        cameraRequest = MapCameraRequest(
+                            requestId = cameraRequestSequence,
+                            target = MapCoordinate(lat = lat, lng = lng),
+                            zoomLevel = SELECTED_CHARGER_ZOOM_LEVEL
                         )
                     }
+                    mapInteractionMessage = "충전소를 선택했습니다."
                 }
             )
         } else {
@@ -1087,15 +1699,11 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 18.dp, end = 16.dp),
-            isCrosswalkVisible = isCrosswalkLayerVisible,
-            isCrosswalkEnabled = accessibilityPublicDataLoaded &&
-                crosswalks.isNotEmpty(),
+            isVoiceRecognitionActive = isVoiceRecognitionActive,
+            isVoiceRecognitionEnabled =
+                !isNavigationMode && !navigationStartPending,
             onLocationClick = {
                 Log.d(LOG_TAG, "현재 위치 아이콘 버튼 클릭")
-                updateBottomSheetExpanded(
-                    expanded = true,
-                    reason = "현재 위치 아이콘 버튼"
-                )
                 val fineLocationGranted = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -1115,13 +1723,25 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                     )
                 }
             },
-            onCrosswalkClick = {
-                isCrosswalkLayerVisible = !isCrosswalkLayerVisible
-                Log.d(
-                    LOG_TAG,
-                    "횡단보도 토글 ON/OFF: " +
-                        if (isCrosswalkLayerVisible) "ON" else "OFF"
-                )
+            onVoiceRecognitionClick = {
+                if (isVoiceRecognitionActive) {
+                    isVoiceRecognitionActive = false
+                    speechRecognizer?.cancel()
+                    Log.d(LOG_TAG, "Voice recognition cancelled")
+                } else {
+                    val microphoneGranted =
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    if (microphoneGranted) {
+                        startVoiceRecognition()
+                    } else {
+                        microphonePermissionLauncher.launch(
+                            Manifest.permission.RECORD_AUDIO
+                        )
+                    }
+                }
             }
         )
 
@@ -1132,8 +1752,10 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                 .then(
                     if (isBottomSheetExpanded) {
                         Modifier.fillMaxHeight(0.52f)
-                    } else {
+                    } else if (selectedCharger != null) {
                         Modifier.height(84.dp)
+                    } else {
+                        Modifier.height(36.dp)
                     }
                 ),
             shape = RoundedCornerShape(
@@ -1150,16 +1772,14 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                 BottomSheetHeader(
                     expanded = isBottomSheetExpanded,
                     selectedChargerName = selectedCharger?.name,
-                    selectedScore = selectedAccessibilityResult?.totalScore,
-                    selectedGrade = selectedAccessibilityResult?.grade,
-                    dataSourceText = mapDataOrigin
-                        ?.let(::formatDataOrigin)
-                        ?: "로딩 중",
+                    selectedDistanceText = selectedDistanceText,
                     onExpandedChange = { expanded ->
-                        updateBottomSheetExpanded(
-                            expanded = expanded,
-                            reason = "handle 조작"
-                        )
+                        if (selectedCharger != null) {
+                            updateBottomSheetExpanded(
+                                expanded = expanded,
+                                reason = "handle 조작"
+                            )
+                        }
                     }
                 )
 
@@ -1175,62 +1795,25 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
                             ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-        StatusMessageArea(
-            messages = listOfNotNull(
-                mapInteractionMessage,
-                myLocationErrorMessage ?: resultText
-            )
-        )
-
-        if (
-            nearestChargers.isNotEmpty() &&
-            accessibilityReferenceCoordinate != null
-        ) {
-            Text(
-                text = "추천 충전소 TOP $NEAREST_LIMIT",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            NearestChargerList(
-                chargers = nearestChargers,
-                selectedCharger = selectedCharger,
-                selectedNearestIndex = selectedNearestIndex,
-                accessibilityReference = accessibilityReferenceCoordinate,
-                accessibilityReferenceLabel = accessibilityReferenceLabel,
-                publicDataContexts = chargerAccessibilityContexts,
-                onChargerClick = ::selectNearestCharger
-            )
-        }
-
         selectedCharger?.let { charger ->
             ChargerDetailPanel(
                 charger = charger,
-                accessibilityResult = selectedAccessibilityResult,
-                publicDataContext = selectedPublicDataContext,
+                distanceText = selectedDistanceText,
                 isRouteVisible = isRouteVisible,
-                routeDistanceText = routeDistanceText,
-                routeDurationText = routeDurationText,
-                routeSourceText = routeSourceText,
-                routeMessage = routeMessage,
-                routeType = routeType,
                 isRouteLoading = isRouteLoading,
+                navigationState = navigationState,
+                isNavigationMode = isNavigationMode,
+                navigationRemainingDistanceM = navigationRemainingDistanceM,
+                navigationEstimatedTimeText = navigationEstimatedTimeText,
+                navigationStatusMessage = navigationStatusMessage,
+                routeMessage = routeMessage,
                 onShowRoute = ::showRouteToSelectedCharger,
                 onHideRoute = {
                     clearRoute(reason = "사용자 경로 숨기기")
                     mapInteractionMessage = "경로를 숨겼습니다."
                 },
-                onClose = {
-                    val hadHighlightedMarker = selectedChargerMapIndex != null
-                    clearRoute(reason = "상세 패널 닫기")
-                    selectedCharger = null
-                    selectedChargerMapIndex = null
-                    selectedNearestIndex = null
-                    mapInteractionMessage = null
-                    Log.d(
-                        LOG_TAG,
-                        "이전 선택 마커 강조 해제 여부: $hadHighlightedMarker"
-                    )
-                }
+                onStartNavigation = ::requestNavigationStart,
+                onStopNavigation = ::stopNavigationWithSpeech
             )
         }
                     }
@@ -1243,10 +1826,10 @@ fun WheelChargeScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun MapOverlayActions(
     modifier: Modifier = Modifier,
-    isCrosswalkVisible: Boolean,
-    isCrosswalkEnabled: Boolean,
+    isVoiceRecognitionActive: Boolean,
+    isVoiceRecognitionEnabled: Boolean,
     onLocationClick: () -> Unit,
-    onCrosswalkClick: () -> Unit
+    onVoiceRecognitionClick: () -> Unit
 ) {
     Column(
         modifier = modifier,
@@ -1255,32 +1838,32 @@ private fun MapOverlayActions(
     ) {
         MapRoundIconButton(
             iconRes = R.drawable.ic_my_location_action,
-            contentDescription = "현재 위치 재측정 및 추천 갱신",
+            contentDescription = "현재 위치 재측정",
             backgroundColor = MaterialTheme.colorScheme.surface,
             iconTint = MaterialTheme.colorScheme.primary,
             borderColor = MaterialTheme.colorScheme.primary,
             onClick = onLocationClick
         )
         MapRoundIconButton(
-            iconRes = R.drawable.ic_crosswalk_action,
-            contentDescription = if (isCrosswalkVisible) {
-                "횡단보도 레이어 끄기"
+            iconRes = R.drawable.ic_microphone_action,
+            contentDescription = if (isVoiceRecognitionActive) {
+                "음성 인식 취소"
             } else {
-                "횡단보도 레이어 켜기"
+                "가까운 충전소 음성 안내"
             },
-            backgroundColor = if (isCrosswalkVisible) {
+            backgroundColor = if (isVoiceRecognitionActive) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.surface
             },
-            iconTint = if (isCrosswalkVisible) {
+            iconTint = if (isVoiceRecognitionActive) {
                 Color.White
             } else {
                 MaterialTheme.colorScheme.primary
             },
             borderColor = MaterialTheme.colorScheme.primary,
-            enabled = isCrosswalkEnabled,
-            onClick = onCrosswalkClick
+            enabled = isVoiceRecognitionEnabled || isVoiceRecognitionActive,
+            onClick = onVoiceRecognitionClick
         )
     }
 }
@@ -1334,16 +1917,10 @@ private fun MapRoundIconButton(
 private fun BottomSheetHeader(
     expanded: Boolean,
     selectedChargerName: String?,
-    selectedScore: Int?,
-    selectedGrade: String?,
-    dataSourceText: String,
+    selectedDistanceText: String,
     onExpandedChange: (Boolean) -> Unit
 ) {
     var accumulatedDrag by remember { mutableStateOf(0f) }
-    val selectedSummary = listOfNotNull(
-        selectedScore?.let { "${it}점" },
-        selectedGrade
-    ).joinToString(" · ")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1391,235 +1968,21 @@ private fun BottomSheetHeader(
                     )
             )
         }
-        if (expanded) {
+        if (!expanded && selectedChargerName != null) {
             Text(
-                text = "WheelCharge",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "전동휠체어 충전소 접근성 안내",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "데이터: $dataSourceText · 아래로 내려 지도 크게 보기",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        } else {
-            Text(
-                text = selectedChargerName
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { name ->
-                        if (selectedSummary.isBlank()) name else "$name · $selectedSummary"
-                    }
-                    ?: "WheelCharge · 추천 충전소 보기",
+                text = selectedChargerName.ifBlank { "시설명 정보 없음" },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "위로 올려 정보 보기 · 데이터: $dataSourceText",
+                text = selectedDistanceText,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-        }
-    }
-}
-
-@Composable
-private fun StatusMessageArea(messages: List<String>) {
-    val visibleMessages = messages
-        .filter { it.isNotBlank() }
-        .distinct()
-    if (visibleMessages.isEmpty()) {
-        return
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            visibleMessages.forEach { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun NearestChargerList(
-    chargers: List<Charger>,
-    selectedCharger: Charger?,
-    selectedNearestIndex: Int?,
-    accessibilityReference: MapCoordinate,
-    accessibilityReferenceLabel: String,
-    publicDataContexts: List<ChargerAccessibilityContext>,
-    onChargerClick: (Charger, Int) -> Unit
-) {
-    val displayedChargers = chargers.take(NEAREST_LIMIT)
-    val matchedPublicDataContexts = remember(
-        displayedChargers,
-        publicDataContexts
-    ) {
-        displayedChargers.map { charger ->
-            findChargerAccessibilityContext(
-                charger = charger,
-                contexts = publicDataContexts
-            )?.context
-        }
-    }
-    val accessibilityResults = remember(
-        displayedChargers,
-        accessibilityReference,
-        matchedPublicDataContexts
-    ) {
-        displayedChargers.mapIndexed { index, charger ->
-            calculateAccessibilityForReference(
-                charger = charger,
-                reference = accessibilityReference,
-                publicDataContext = matchedPublicDataContexts[index],
-                basisLocationText = accessibilityReferenceLabel
-            )
-        }
-    }
-    LaunchedEffect(displayedChargers, selectedNearestIndex) {
-        Log.d(
-            LOG_TAG,
-            "TOP 5 카드 렌더링: count=${displayedChargers.size}, " +
-                "selectedIndex=$selectedNearestIndex"
-        )
-    }
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        displayedChargers.forEachIndexed { index, charger ->
-            val accessibilityResult = accessibilityResults[index]
-            val publicDataContext = matchedPublicDataContexts[index]
-            val isSelected =
-                selectedCharger?.let { sameCharger(charger, it) } == true ||
-                    (
-                        index == selectedNearestIndex &&
-                            selectedCharger == charger
-                    )
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        Log.d(
-                            LOG_TAG,
-                            "TOP 5 카드 클릭: index=$index, id=${charger.id}"
-                        )
-                        onChargerClick(charger, index)
-                    },
-                shape = RoundedCornerShape(18.dp),
-                border = if (isSelected) {
-                    BorderStroke(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                } else {
-                    null
-                },
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    }
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(
-                                modifier = Modifier.padding(
-                                    horizontal = 10.dp,
-                                    vertical = 5.dp
-                                ),
-                                text = "${index + 1}",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = charger.name.displayOr("시설명 정보 없음"),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (isSelected) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(50)
-                            ) {
-                                Text(
-                                    modifier = Modifier.padding(
-                                        horizontal = 9.dp,
-                                        vertical = 4.dp
-                                    ),
-                                    text = "선택됨",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                    Text(
-                        text = "${formatDistance(charger.distance_m)} · " +
-                            "접근성 ${accessibilityResult.totalScore}점 · " +
-                            accessibilityResult.grade,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (publicDataContext != null) {
-                        Text(
-                            text = "공공데이터 반영: 횡단보도 · 경사도",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        text = "탭하여 지도에서 보기",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
         }
     }
 }
@@ -1627,26 +1990,20 @@ private fun NearestChargerList(
 @Composable
 private fun ChargerDetailPanel(
     charger: Charger,
-    accessibilityResult: AccessibilityScoreResult?,
-    publicDataContext: ChargerAccessibilityContext?,
+    distanceText: String,
     isRouteVisible: Boolean,
-    routeDistanceText: String?,
-    routeDurationText: String?,
-    routeSourceText: String?,
-    routeMessage: String?,
-    routeType: RouteLineType?,
     isRouteLoading: Boolean,
+    navigationState: NavigationState,
+    isNavigationMode: Boolean,
+    navigationRemainingDistanceM: Double?,
+    navigationEstimatedTimeText: String?,
+    navigationStatusMessage: String?,
+    routeMessage: String?,
     onShowRoute: () -> Unit,
     onHideRoute: () -> Unit,
-    onClose: () -> Unit
+    onStartNavigation: () -> Unit,
+    onStopNavigation: () -> Unit
 ) {
-    LaunchedEffect(charger.id, accessibilityResult?.totalScore, isRouteVisible) {
-        Log.d(
-            LOG_TAG,
-            "상세정보 패널 렌더링: id=${charger.id}, " +
-                "score=${accessibilityResult?.totalScore}, route=$isRouteVisible"
-        )
-    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -1663,35 +2020,15 @@ private fun ChargerDetailPanel(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "선택 충전소",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
                 text = charger.name.displayOr("시설명 정보 없음"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
-            accessibilityResult?.let { result ->
-                AccessibilitySummary(result = result)
-            }
             Text(
-                text = charger.address.displayOr("주소 정보 없음"),
+                text = distanceText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            RouteSummary(
-                isRouteVisible = isRouteVisible,
-                routeDistanceText = routeDistanceText,
-                routeDurationText = routeDurationText,
-                routeSourceText = routeSourceText,
-                routeMessage = routeMessage,
-                routeType = routeType,
-                isRouteLoading = isRouteLoading,
-                onShowRoute = onShowRoute,
-                onHideRoute = onHideRoute
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1699,6 +2036,10 @@ private fun ChargerDetailPanel(
                 text = "기본정보",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
+            )
+            DetailInfoRow(
+                label = "주소",
+                value = charger.address.displayOr("주소 정보 없음")
             )
             DetailInfoRow(
                 label = "설치 위치",
@@ -1713,92 +2054,28 @@ private fun ChargerDetailPanel(
                 value = charger.is_indoor.booleanLabel("실내", "실외")
             )
             DetailInfoRow(
-                label = "이동식 충전기",
+                label = "이동식 충전기 여부",
                 value = charger.is_movable.booleanLabel("가능", "불가")
             )
 
-            accessibilityResult?.let { result ->
-                AccessibilityBreakdownSummary(result = result)
-                RecommendationReasonSummary(reasons = result.reasons)
-            }
-            PublicDataAccessibilitySummary(context = publicDataContext)
-
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onClose
-            ) {
-                Text("닫기")
-            }
-        }
-    }
-}
-
-@Composable
-private fun AccessibilitySummary(
-    result: AccessibilityScoreResult
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val gradeColor = accessibilityGradeColor(result.grade)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "접근성 점수",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${result.totalScore}점",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Surface(
-                    color = gradeColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        modifier = Modifier.padding(
-                            horizontal = 12.dp,
-                            vertical = 6.dp
-                        ),
-                        text = result.grade,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = gradeColor
-                    )
-                }
-            }
-            Text(
-                text = result.distanceM?.let { distance ->
-                    "${result.basisLocationText}에서 ${formatDistance(distance)}"
-                } ?: "현재 위치를 확인하면 거리 점수가 갱신됩니다.",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "거리 · 충전소 정보 · 횡단보도 · 경사 · 이용 편의 통합",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            RouteSummary(
+                isRouteVisible = isRouteVisible,
+                isRouteLoading = isRouteLoading,
+                navigationState = navigationState,
+                isNavigationMode = isNavigationMode,
+                navigationRemainingDistanceM = navigationRemainingDistanceM,
+                navigationEstimatedTimeText = navigationEstimatedTimeText,
+                navigationStatusMessage = navigationStatusMessage,
+                routeMessage = routeMessage,
+                onShowRoute = onShowRoute,
+                onHideRoute = onHideRoute,
+                onStartNavigation = onStartNavigation,
+                onStopNavigation = onStopNavigation
             )
         }
     }
 }
-
 @Composable
 private fun DetailInfoRow(
     label: String,
@@ -1825,396 +2102,126 @@ private fun DetailInfoRow(
 }
 
 @Composable
-private fun AccessibilityBreakdownSummary(
-    result: AccessibilityScoreResult
+private fun RouteSummary(
+    isRouteVisible: Boolean,
+    isRouteLoading: Boolean,
+    navigationState: NavigationState,
+    isNavigationMode: Boolean,
+    navigationRemainingDistanceM: Double?,
+    navigationEstimatedTimeText: String?,
+    navigationStatusMessage: String?,
+    routeMessage: String?,
+    onShowRoute: () -> Unit,
+    onHideRoute: () -> Unit,
+    onStartNavigation: () -> Unit,
+    onStopNavigation: () -> Unit
 ) {
-    val breakdown = result.breakdown
-    LaunchedEffect(result.totalScore, breakdown) {
-        Log.d(
-            LOG_TAG,
-            "점수 breakdown 렌더링: total=${result.totalScore}/100"
-        )
-    }
-    Card(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "점수 구성",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "합계 ${result.totalScore}/100",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            ScoreBreakdownRow(
-                label = "거리 접근성",
-                score = breakdown.distanceScore,
-                maxScore = breakdown.maxDistanceScore
-            )
-            ScoreBreakdownRow(
-                label = "충전소 정보",
-                score = breakdown.chargerInfoScore,
-                maxScore = breakdown.maxChargerInfoScore
-            )
-            ScoreBreakdownRow(
-                label = "횡단보도 접근성",
-                score = breakdown.crosswalkScore,
-                maxScore = breakdown.maxCrosswalkScore
-            )
-            ScoreBreakdownRow(
-                label = "경사 안전성",
-                score = breakdown.slopeScore,
-                maxScore = breakdown.maxSlopeScore
-            )
-            ScoreBreakdownRow(
-                label = "이용 편의성",
-                score = breakdown.convenienceScore,
-                maxScore = breakdown.maxConvenienceScore
-            )
-        }
-    }
-}
-
-@Composable
-private fun ScoreBreakdownRow(
-    label: String,
-    score: Int,
-    maxScore: Int
-) {
-    val progress = if (maxScore > 0) {
-        (score.toFloat() / maxScore.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = "$score/$maxScore",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Box(
+        if (isRouteLoading) {
+            OutlinedButton(
                 modifier = Modifier
-                    .fillMaxWidth(progress)
-                    .height(6.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
+                    .weight(1f)
+                    .height(52.dp),
+                enabled = false,
+                onClick = {}
+            ) {
+                Text("경로 준비 중", maxLines = 1)
+            }
+        } else if (isRouteVisible) {
+            OutlinedButton(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                onClick = onHideRoute
+            ) {
+                Text("경로 숨기기", maxLines = 1)
+            }
+        } else {
+            OutlinedButton(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                onClick = onShowRoute
+            ) {
+                Text("경로 표시", maxLines = 1)
+            }
         }
-    }
-}
 
-@Composable
-private fun RecommendationReasonSummary(reasons: List<String>) {
-    val blockedLabels = listOf(
-        "보행자전용도로",
-        "보호구역",
-        "편의시설",
-        "기상청"
-    )
-    val visibleReasons = reasons
-        .filterNot { reason ->
-            blockedLabels.any { blocked -> reason.contains(blocked) }
-        }
-        .take(5)
-    LaunchedEffect(visibleReasons) {
-        Log.d(LOG_TAG, "추천 사유 렌더링: count=${visibleReasons.size}")
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            Text(
-                text = "추천 이유",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            if (visibleReasons.isEmpty()) {
-                Text(
-                    text = "추천 근거 정보 없음",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                visibleReasons.forEach { reason ->
-                    Text(
-                        text = "• $reason",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+        when {
+            navigationState == NavigationState.ROUTE_LOADING -> {
+                Button(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    enabled = false,
+                    onClick = {}
+                ) {
+                    Text("안내 준비 중", maxLines = 1)
+                }
+            }
+            isNavigationMode -> {
+                OutlinedButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    onClick = onStopNavigation
+                ) {
+                    Text("경로 안내 종료", maxLines = 1)
+                }
+            }
+            else -> {
+                Button(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    onClick = onStartNavigation
+                ) {
+                    Text("경로 안내 시작", maxLines = 1)
                 }
             }
         }
     }
-}
 
-@Composable
-private fun PublicDataAccessibilitySummary(
-    context: ChargerAccessibilityContext?
-) {
-    val crosswalk = context?.crosswalk
-    val slope = context?.elevationSlope
-    LaunchedEffect(context) {
-        Log.d(
-            LOG_TAG,
-            "공공데이터 접근성 영역 렌더링: available=${context != null}"
-        )
+    if (navigationState != NavigationState.IDLE) {
+        navigationRemainingDistanceM?.let { distance ->
+            Text(
+                text = "남은 거리: " + formatNavigationDistance(distance),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        navigationEstimatedTimeText?.let { estimatedTime ->
+            Text(
+                text = "예상 시간: $estimatedTime",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        navigationStatusMessage
+            ?.takeIf { it.isNotBlank() }
+            ?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
     }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+
+    routeMessage
+        ?.takeIf { it.isNotBlank() }
+        ?.let { message ->
             Text(
-                text = "공공데이터 기반 접근성",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            PublicDataInfoRow(
-                firstLabel = "주변 횡단보도",
-                firstValue = crosswalk?.countWithin150m.countText(),
-                secondLabel = "가장 가까운 횡단보도",
-                secondValue = crosswalk?.nearestDistanceM?.let(::formatDistance)
-                    ?: "정보 없음"
-            )
-            PublicDataInfoRow(
-                firstLabel = "보도턱 낮춤",
-                firstValue = crosswalk?.curbCutCount.countText(),
-                secondLabel = "점자블록",
-                secondValue = crosswalk?.tactileBlockCount.countText()
-            )
-            PublicDataInfoRow(
-                firstLabel = "보행자신호",
-                firstValue = crosswalk?.pedestrianSignalCount.countText(),
-                secondLabel = "고도",
-                secondValue = slope?.elevationM?.let {
-                    String.format(Locale.US, "%.1fm", it)
-                } ?: "정보 없음"
-            )
-            PublicDataInfoRow(
-                firstLabel = "경사도 추정",
-                firstValue = slope?.slopePercentEstimate?.let {
-                    String.format(Locale.US, "%.1f%%", it)
-                } ?: "정보 없음",
-                secondLabel = "경사 위험도",
-                secondValue = slope?.slopeRisk.displayOr("정보 없음")
-            )
-            Text(
-                text = "고도와 경사도는 VWorld DEM 90m 기반 추정값입니다.",
+                text = message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
 }
-
-@Composable
-private fun PublicDataInfoRow(
-    firstLabel: String,
-    firstValue: String,
-    secondLabel: String,
-    secondValue: String
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        PublicDataInfoCell(
-            modifier = Modifier.weight(1f),
-            label = firstLabel,
-            value = firstValue
-        )
-        PublicDataInfoCell(
-            modifier = Modifier.weight(1f),
-            label = secondLabel,
-            value = secondValue
-        )
-    }
-}
-
-@Composable
-private fun PublicDataInfoCell(
-    modifier: Modifier,
-    label: String,
-    value: String
-) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-private fun RouteSummary(
-    isRouteVisible: Boolean,
-    routeDistanceText: String?,
-    routeDurationText: String?,
-    routeSourceText: String?,
-    routeMessage: String?,
-    routeType: RouteLineType?,
-    isRouteLoading: Boolean,
-    onShowRoute: () -> Unit,
-    onHideRoute: () -> Unit
-) {
-    LaunchedEffect(isRouteVisible, routeMessage, routeType, isRouteLoading) {
-        Log.d(
-            LOG_TAG,
-            "경로 보기/숨기기 버튼 상태: " +
-                when {
-                    isRouteLoading -> "경로 불러오는 중"
-                    isRouteVisible -> "경로 숨기기"
-                    else -> "경로 보기"
-                }
-        )
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "경로 안내",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            routeSourceText?.let { text ->
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            routeDistanceText?.let { text ->
-                Text(text = text, fontWeight = FontWeight.Bold)
-            }
-            routeDurationText?.let { text ->
-                Text(text = text, fontWeight = FontWeight.SemiBold)
-            }
-            if (isRouteLoading) {
-                Button(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    enabled = false,
-                    onClick = {}
-                ) {
-                    Text("경로 불러오는 중...")
-                }
-            } else if (isRouteVisible) {
-                OutlinedButton(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    onClick = onHideRoute
-                ) {
-                    Text("경로 숨기기")
-                }
-            } else {
-                Button(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    onClick = onShowRoute
-                ) {
-                    Text("경로 보기")
-                }
-            }
-            routeMessage
-                ?.takeIf { it.isNotBlank() }
-                ?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            val helperText = when (routeType) {
-                RouteLineType.TMAP_PEDESTRIAN ->
-                    "TMAP 경로는 실제 현장 상황과 차이가 있을 수 있습니다."
-                RouteLineType.FALLBACK_STRAIGHT -> null
-                null ->
-                    "현재 위치를 기준으로 계단 제외 우선 보행자 경로를 탐색합니다."
-            }
-            helperText?.let { text ->
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
 private fun String?.displayOr(fallback: String): String =
     if (this.isNullOrBlank()) fallback else this
 
@@ -2227,183 +2234,65 @@ private fun Boolean?.booleanLabel(
     null -> "정보 없음"
 }
 
-private fun Int?.countText(): String = this?.let { "${it}개" } ?: "정보 없음"
-
-private fun accessibilityGradeColor(grade: String): Color = when (grade) {
-    "적극 추천" -> Color(0xFF047857)
-    "이용 추천" -> Color(0xFF2563EB)
-    "확인 후 이용" -> Color(0xFFF59E0B)
-    else -> Color(0xFFDC2626)
+internal fun formatNavigationDistance(distanceMeters: Double): String {
+    if (!distanceMeters.isFinite() || distanceMeters < 0.0) {
+        return "거리 정보 없음"
+    }
+    return if (distanceMeters < 1_000.0) {
+        "약 ${distanceMeters.roundToInt()}m"
+    } else {
+        String.format(Locale.US, "약 %.1fkm", distanceMeters / 1_000.0)
+    }
 }
 
-private fun buildApiUrl(path: String): String = ApiConfig.BASE_URL + path
-
-private fun buildNearestApiUrl(
-    lat: Double = TEST_LAT,
-    lng: Double = TEST_LNG
-): String =
-    buildApiUrl(NEAREST_PATH) + "?lat=$lat&lng=$lng&limit=$NEAREST_LIMIT"
-
-private fun buildChargerListText(
-    chargers: List<Charger>,
-    origin: ChargerDataOrigin,
-    fallbackUsed: Boolean
+internal fun calculateNavigationEstimatedTimeText(
+    remainingDistanceMeters: Double
 ): String {
-    val sourceHeader = buildDataSourceHeader(
-        origin = origin,
-        fallbackUsed = fallbackUsed,
-        fallbackMessage = "서버 연결 실패로 로컬 데이터를 사용합니다."
-    )
-
-    if (chargers.isEmpty()) {
-        return "$sourceHeader\n\n충전소 데이터가 없습니다."
+    if (
+        !remainingDistanceMeters.isFinite() ||
+        remainingDistanceMeters < 0.0
+    ) {
+        return "예상 시간 정보 없음"
     }
+    val minutes = remainingDistanceMeters /
+        (NAVIGATION_SPEED_METERS_PER_HOUR / 60.0)
+    return if (minutes < 1.0) {
+        "1분 미만"
+    } else {
+        "약 ${ceil(minutes).toInt()}분"
+    }
+}
 
-    return "$sourceHeader\n\n" +
-        chargers.joinToString(separator = "\n\n") { charger ->
-            "시설명: ${charger.name}\n" +
-                "주소: ${charger.address}\n" +
-                "설치구분: ${charger.install_type ?: "정보 없음"}\n" +
-                "문의처: ${charger.contact_phone ?: "정보 없음"}"
+internal fun isLocationOffRoute(
+    currentLocation: MapCoordinate,
+    routePoints: List<MapCoordinate>,
+    thresholdMeters: Double = NAVIGATION_OFF_ROUTE_DISTANCE_METERS
+): Boolean {
+    if (
+        routePoints.isEmpty() ||
+        !isValidCoordinate(currentLocation.lat, currentLocation.lng)
+    ) {
+        return false
+    }
+    val nearestDistance = routePoints
+        .asSequence()
+        .filter { isValidCoordinate(it.lat, it.lng) }
+        .map { point ->
+            haversineDistanceMeters(
+                startLat = currentLocation.lat,
+                startLng = currentLocation.lng,
+                endLat = point.lat,
+                endLng = point.lng
+            )
         }
-}
-
-private fun buildNearestChargerHeaderText(
-    chargers: List<Charger>,
-    origin: ChargerDataOrigin,
-    fallbackUsed: Boolean
-): String {
-    val sourceHeader = buildDataSourceHeader(
-        origin = origin,
-        fallbackUsed = fallbackUsed,
-        fallbackMessage = "서버 연결 실패로 로컬 추천 결과를 사용합니다."
-    )
-    val header = "가까운 충전소 TOP $NEAREST_LIMIT\n$sourceHeader"
-    return if (chargers.isEmpty()) {
-        "$header\n\n가까운 충전소 데이터가 없습니다."
-    } else {
-        header
-    }
-}
-
-private fun buildCurrentLocationNearestHeaderText(
-    chargers: List<Charger>,
-    origin: ChargerDataOrigin
-): String {
-    val source = formatDataOrigin(origin)
-    val header = "현재 위치 기준 추천 완료 · 데이터: $source"
-    return if (chargers.isEmpty()) {
-        "$header\n가까운 충전소 데이터가 없습니다."
-    } else {
-        header
-    }
-}
-
-private fun buildNearestChargerListText(
-    chargers: List<Charger>,
-    origin: ChargerDataOrigin,
-    fallbackUsed: Boolean
-): String {
-    val sourceHeader = buildDataSourceHeader(
-        origin = origin,
-        fallbackUsed = fallbackUsed,
-        fallbackMessage = "서버 연결 실패로 로컬 추천 결과를 사용합니다."
-    )
-
-    if (chargers.isEmpty()) {
-        return "$sourceHeader\n\n가까운 충전소 데이터가 없습니다."
-    }
-
-    return "가까운 충전소 TOP $NEAREST_LIMIT\n" +
-        "$sourceHeader\n\n" +
-        buildNearestChargerItemsText(chargers)
-}
-
-private fun buildCurrentLocationNearestListText(
-    chargers: List<Charger>,
-    lat: Double,
-    lng: Double,
-    origin: ChargerDataOrigin,
-    fallbackUsed: Boolean
-): String {
-    val sourceHeader = buildDataSourceHeader(
-        origin = origin,
-        fallbackUsed = fallbackUsed,
-        fallbackMessage = "서버 연결 실패로 로컬 추천 결과를 사용합니다."
-    )
-    val header = "현재 위치 기준 가까운 충전소 TOP $NEAREST_LIMIT\n" +
-        "기준 위치: 현재 위치\n" +
-        "위도: ${formatCoordinate(lat)} / 경도: ${formatCoordinate(lng)}\n" +
-        sourceHeader
-
-    if (chargers.isEmpty()) {
-        return "$header\n\n가까운 충전소 데이터가 없습니다."
-    }
-
-    return "$header\n\n" + buildNearestChargerItemsText(chargers)
-}
-
-private fun buildDataSourceHeader(
-    origin: ChargerDataOrigin,
-    fallbackUsed: Boolean,
-    fallbackMessage: String
-): String {
-    val source = formatDataOrigin(origin)
-
-    return if (fallbackUsed) {
-        "$fallbackMessage\n데이터 출처: $source"
-    } else {
-        "데이터 출처: $source"
-    }
+        .minOrNull()
+        ?: return false
+    return nearestDistance > thresholdMeters
 }
 
 private fun formatDataOrigin(origin: ChargerDataOrigin): String = when (origin) {
     ChargerDataOrigin.SERVER -> "서버"
     ChargerDataOrigin.LOCAL_JSON -> "로컬 JSON"
-}
-
-private fun buildNearestChargerItemsText(chargers: List<Charger>): String {
-    return chargers.take(NEAREST_LIMIT).mapIndexed { index, charger ->
-        "${index + 1}위\n" +
-            "시설명: ${charger.name}\n" +
-            "거리: ${formatDistance(charger.distance_m)}\n" +
-            "주소: ${charger.address}\n" +
-            "설치구분: ${charger.install_type ?: "정보 없음"}\n" +
-            "설치 위치 설명: ${charger.install_place ?: "정보 없음"}\n" +
-            "문의처: ${charger.contact_phone ?: "정보 없음"}"
-    }.joinToString(separator = "\n\n")
-}
-
-private fun calculateAccessibilityForReference(
-    charger: Charger,
-    reference: MapCoordinate,
-    publicDataContext: ChargerAccessibilityContext?,
-    basisLocationText: String
-): AccessibilityScoreResult {
-    val chargerLat = charger.lat
-    val chargerLng = charger.lng
-    val distanceM = if (
-        chargerLat != null &&
-        chargerLng != null &&
-        isValidCoordinate(chargerLat, chargerLng) &&
-        isValidCoordinate(reference.lat, reference.lng)
-    ) {
-        haversineDistanceMeters(
-            startLat = reference.lat,
-            startLng = reference.lng,
-            endLat = chargerLat,
-            endLng = chargerLng
-        )
-    } else {
-        null
-    }
-
-    return calculateAccessibilityScore(
-        charger = charger,
-        distanceM = distanceM,
-        context = publicDataContext,
-        basisLocationText = basisLocationText
-    )
 }
 
 private data class ChargerMatch(
@@ -2456,6 +2345,50 @@ private fun findMatchingMapCharger(
     )
 }
 
+private fun findDestinationSlopeRisk(
+    charger: Charger?,
+    elevationSlopeItems: List<ElevationSlopeInfo>
+): String? {
+    charger ?: return null
+    val chargerId = charger.id.normalized()
+    if (chargerId.isNotEmpty()) {
+        elevationSlopeItems.firstOrNull {
+            it.chargerId.normalized() == chargerId
+        }?.slopeRisk?.let { return it }
+    }
+
+    val chargerLat = charger.lat
+    val chargerLng = charger.lng
+    if (
+        chargerLat == null ||
+        chargerLng == null ||
+        !isValidCoordinate(chargerLat, chargerLng)
+    ) {
+        return null
+    }
+    return elevationSlopeItems.mapNotNull { item ->
+        val lat = item.lat
+        val lng = item.lng
+        if (
+            lat == null ||
+            lng == null ||
+            !isValidCoordinate(lat, lng)
+        ) {
+            null
+        } else {
+            item to haversineDistanceMeters(
+                startLat = chargerLat,
+                startLng = chargerLng,
+                endLat = lat,
+                endLng = lng
+            )
+        }
+    }.minByOrNull { it.second }
+        ?.takeIf { it.second <= 75.0 }
+        ?.first
+        ?.slopeRisk
+}
+
 private fun sameCharger(first: Charger, second: Charger): Boolean {
     if (first === second || first == second) {
         return true
@@ -2483,11 +2416,37 @@ private fun isValidCoordinate(lat: Double, lng: Double): Boolean =
     lat.isFinite() && lng.isFinite() &&
         lat in -90.0..90.0 && lng in -180.0..180.0
 
-private fun formatCoordinate(coordinate: Double): String =
-    String.format(Locale.US, "%.6f", coordinate)
+private fun formatDistanceFromCurrentLocation(
+    charger: Charger?,
+    currentLocation: MapCoordinate?
+): String {
+    val lat = charger?.lat
+    val lng = charger?.lng
+    if (
+        currentLocation == null ||
+        lat == null ||
+        lng == null ||
+        !isValidCoordinate(currentLocation.lat, currentLocation.lng) ||
+        !isValidCoordinate(lat, lng)
+    ) {
+        return "거리 정보 없음"
+    }
+
+    val distanceMeters = haversineDistanceMeters(
+        startLat = currentLocation.lat,
+        startLng = currentLocation.lng,
+        endLat = lat,
+        endLng = lng
+    )
+    return "현재 위치에서 약 ${formatDistance(distanceMeters)}"
+}
 
 private fun formatDistance(distanceMeters: Double?): String {
-    if (distanceMeters == null) {
+    if (
+        distanceMeters == null ||
+        !distanceMeters.isFinite() ||
+        distanceMeters < 0.0
+    ) {
         return "거리 정보 없음"
     }
 

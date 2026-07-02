@@ -12,11 +12,113 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 private const val LOG_TAG = "WheelCharge"
 private const val TMAP_BASE_URL = "https://apis.openapi.sk.com/"
+internal val TMAP_ROUTE_SEARCH_OPTIONS = listOf("30", "0", "4", "10")
 
 class TmapRouteRepository(
     private val api: TmapApiService = TmapRetrofitClient.api,
     private val appKey: String = BuildConfig.TMAP_APP_KEY
 ) {
+    fun requestBestPedestrianRoute(
+        request: TmapRouteRequest,
+        directDistanceM: Double?,
+        destinationSlopeRisk: String?,
+        onResult: (Result<RouteSelectionResult>) -> Unit
+    ) {
+        Log.d(LOG_TAG, "Route candidate request start")
+        val candidates = mutableListOf<RouteCandidate>()
+
+        fun requestNext(optionIndex: Int) {
+            if (optionIndex >= TMAP_ROUTE_SEARCH_OPTIONS.size) {
+                Log.d(LOG_TAG, "Route candidate count: ${candidates.size}")
+                val selection = runCatching {
+                    RouteCandidateSelector.select(
+                        candidates = candidates,
+                        directDistanceM = directDistanceM,
+                        destinationSlopeRisk = destinationSlopeRisk
+                    )
+                }.onFailure { exception ->
+                    Log.e(LOG_TAG, "Route candidate selection failed", exception)
+                }.getOrNull()
+                if (selection == null) {
+                    onResult(
+                        Result.failure(
+                            IllegalStateException(
+                                "No usable TMAP route candidates"
+                            )
+                        )
+                    )
+                    return
+                }
+
+                selection.candidates.forEach { candidate ->
+                    Log.d(
+                        LOG_TAG,
+                        "Route candidate score: option=${candidate.searchOption}, " +
+                            "score=${candidate.score?.totalScore}"
+                    )
+                }
+                val selected = selection.selectedRoute
+                Log.d(
+                    LOG_TAG,
+                    "Selected route option: ${selected.searchOption}"
+                )
+                Log.d(
+                    LOG_TAG,
+                    "Selected route distance: ${selected.distanceM}"
+                )
+                Log.d(
+                    LOG_TAG,
+                    "Selected route duration: ${selected.durationS}"
+                )
+                Log.d(
+                    LOG_TAG,
+                    "Selected route points count: ${selected.routePoints.size}"
+                )
+                onResult(Result.success(selection))
+                return
+            }
+
+            val option = TMAP_ROUTE_SEARCH_OPTIONS[optionIndex]
+            Log.d(LOG_TAG, "Route candidate option: $option")
+            requestPedestrianRoute(
+                request = request.copy(searchOption = option)
+            ) { result ->
+                result.fold(
+                    onSuccess = { route ->
+                        if (route.routePoints.size >= 2) {
+                            candidates += RouteCandidate(
+                                searchOption = option,
+                                routePoints = route.routePoints,
+                                distanceM = route.totalDistanceM,
+                                durationS = route.totalDurationS
+                            )
+                            Log.d(
+                                LOG_TAG,
+                                "Route candidate success: option=$option"
+                            )
+                        } else {
+                            Log.w(
+                                LOG_TAG,
+                                "Route candidate failed: option=$option, " +
+                                    "insufficient points"
+                            )
+                        }
+                    },
+                    onFailure = { exception ->
+                        Log.w(
+                            LOG_TAG,
+                            "Route candidate failed: option=$option",
+                            exception
+                        )
+                    }
+                )
+                requestNext(optionIndex + 1)
+            }
+        }
+
+        requestNext(0)
+    }
+
     fun requestPedestrianRoute(
         request: TmapRouteRequest,
         onResult: (Result<PedestrianRouteResult>) -> Unit

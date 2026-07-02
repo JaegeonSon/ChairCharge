@@ -48,10 +48,9 @@ private const val CHARGER_MARKER_HEIGHT_DP = 52
 private const val SELECTED_MARKER_WIDTH_DP = 48
 private const val SELECTED_MARKER_HEIGHT_DP = 62
 private const val MY_LOCATION_DOT_SIZE_DP = 24
-private const val CROSSWALK_DOT_SIZE_DP = 10
 
 private data class ChargerMarkerTag(
-    val chargerId: String?,
+    val charger: Charger,
     val index: Int
 )
 
@@ -87,7 +86,6 @@ fun WheelChargeKakaoMap(
     selectedChargerIndex: Int?,
     cameraRequest: MapCameraRequest?,
     routeLineRequest: RouteLineRequest?,
-    crosswalkLocations: List<MapCoordinate>,
     modifier: Modifier = Modifier,
     onMapViewCreated: () -> Unit,
     onMapViewSizeChanged: (width: Int, height: Int) -> Unit,
@@ -101,9 +99,7 @@ fun WheelChargeKakaoMap(
     onSelectionMarkerApplied: (Boolean) -> Unit,
     onRouteLineResult: (succeeded: Boolean, error: Throwable?) -> Unit,
     onRouteCameraMoveResult: (succeeded: Boolean, error: Throwable?) -> Unit,
-    onCrosswalksDisplayed: (Int) -> Unit,
-    onCrosswalkLayerError: (Throwable) -> Unit,
-    onChargerMarkerClick: (chargerId: String?, index: Int) -> Unit
+    onChargerMarkerClick: (charger: Charger, index: Int) -> Unit
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
@@ -127,12 +123,6 @@ fun WheelChargeKakaoMap(
     val currentOnRouteLineResult by rememberUpdatedState(onRouteLineResult)
     val currentOnRouteCameraMoveResult by rememberUpdatedState(
         onRouteCameraMoveResult
-    )
-    val currentOnCrosswalksDisplayed by rememberUpdatedState(
-        onCrosswalksDisplayed
-    )
-    val currentOnCrosswalkLayerError by rememberUpdatedState(
-        onCrosswalkLayerError
     )
     val currentOnChargerMarkerClick by rememberUpdatedState(onChargerMarkerClick)
 
@@ -202,11 +192,11 @@ fun WheelChargeKakaoMap(
                                         Log.d(
                                             LOG_TAG,
                                             "클릭한 마커 식별값: " +
-                                                "chargerId=${tag.chargerId}, " +
+                                                "chargerId=${tag.charger.id}, " +
                                                 "index=${tag.index}"
                                         )
                                         currentOnChargerMarkerClick(
-                                            tag.chargerId,
+                                            tag.charger,
                                             tag.index
                                         )
                                         true
@@ -459,8 +449,7 @@ fun WheelChargeKakaoMap(
         kakaoMap,
         chargers,
         myLocation,
-        selectedChargerIndex,
-        crosswalkLocations
+        selectedChargerIndex
     ) {
         val map = kakaoMap ?: return@LaunchedEffect
         val labelManager = try {
@@ -538,7 +527,7 @@ fun WheelChargeKakaoMap(
                         .setClickable(true)
                         .setTag(
                             ChargerMarkerTag(
-                                chargerId = charger.id,
+                                charger = charger,
                                 index = index
                             )
                         )
@@ -577,46 +566,6 @@ fun WheelChargeKakaoMap(
                 currentOnSelectionMarkerApplied(false)
             }
             currentOnMarkerError(exception)
-        }
-
-        if (crosswalkLocations.isEmpty()) {
-            currentOnCrosswalksDisplayed(0)
-        } else {
-            var displayedCrosswalkCount = 0
-            try {
-                val crosswalkBitmap = drawableToBitmap(
-                    context = context,
-                    drawableResId = R.drawable.ic_crosswalk_dot,
-                    widthDp = CROSSWALK_DOT_SIZE_DP,
-                    heightDp = CROSSWALK_DOT_SIZE_DP
-                )
-                val crosswalkStyles = labelManager.addLabelStyles(
-                    LabelStyles.from(LabelStyle.from(crosswalkBitmap))
-                )
-                crosswalkLocations.forEachIndexed { index, coordinate ->
-                    if (!isValidMapCoordinate(coordinate.lat, coordinate.lng)) {
-                        return@forEachIndexed
-                    }
-                    labelLayer.addLabel(
-                        LabelOptions.from(
-                            "crosswalk_$index",
-                            LatLng.from(coordinate.lat, coordinate.lng)
-                        )
-                            .setStyles(crosswalkStyles)
-                            .setClickable(false)
-                    )
-                    displayedCrosswalkCount += 1
-                }
-                Log.d(
-                    LOG_TAG,
-                    "횡단보도 레이어 표시 성공: $displayedCrosswalkCount"
-                )
-                currentOnCrosswalksDisplayed(displayedCrosswalkCount)
-            } catch (exception: Exception) {
-                Log.e(LOG_TAG, "횡단보도 레이어 표시 실패", exception)
-                currentOnCrosswalksDisplayed(displayedCrosswalkCount)
-                currentOnCrosswalkLayerError(exception)
-            }
         }
 
         if (myLocation == null) {

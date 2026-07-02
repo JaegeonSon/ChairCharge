@@ -4,13 +4,10 @@
     "generated_for": "WheelCharge accessibility scoring",
     "charger_count": 20,
     "pedestrian_roads_count": 0,
-    "crosswalks_count": 3989,
     "dem_source": "VWorld DEM 90m",
     "pedestrian_note": "업로드된 국토교통부 C_UQ164_RO SHP에는 군산시 코드 45130/52130 데이터가 없어 보행자전용도로는 0건으로 처리함. 인접 김제시(52210) 데이터 18건이 bbox에 걸렸으나 군산시 데이터가 아니므로 제외함.",
-    "crosswalk_source": "전북특별자치도 횡단보도 현황 제공 2021-12-21",
     "created_outputs": [
       "pedestrian_roads_gunsan_app.geojson",
-      "crosswalks_gunsan_app.geojson",
       "elevation_slope_gunsan_app.json",
       "charger_accessibility_context_gunsan.json"
     ]
